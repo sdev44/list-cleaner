@@ -191,11 +191,13 @@ async function cmdDiagnose(input: string, v: Record<string, unknown>) {
       const plain = second.page ? (plainText < 80 ? `Read, but only ${plainText} characters` : `OK now (${plainText} characters)`) : (first.error || 'failed') + (second.error && second.error !== first.error ? ' / ' + second.error : '');
       let viaBrowser = 'not tried', browserText = 0;
       if (browser && (!second.page || plainText < 80)) {
-        const seen = await browser.read(url);
-        browserText = seen ? readPage(seen.html, seen.url).text.length : 0;
-        viaBrowser = !seen ? 'failed' : browserText < 80 ? `only ${browserText} characters` : 'OK';
+        const seen = await browser.readDetailed(url);
+        browserText = seen.page ? readPage(seen.page.html, seen.page.url).text.length : 0;
+        viaBrowser = !seen.page ? 'failed: ' + (seen.error || 'unknown') : browserText < 80 ? `only ${browserText} characters` + (seen.error ? ` (${seen.error})` : '') : 'OK' + (seen.error ? ` (${seen.error})` : '');
       }
-      const bucket = second.page && plainText >= 80 ? 'Plain request works now' : viaBrowser === 'OK' ? 'Fixed by browser' : 'Still unreadable';
+      const bucket = second.page && plainText >= 80 ? 'Plain request works now' : viaBrowser.startsWith('OK') ? 'Fixed by browser' : 'Still unreadable';
+      const bReason = viaBrowser.startsWith('failed') ? viaBrowser.replace(/https?:\/\/\S+/g, '').slice(0, 60) : '';
+      if (bReason) tally['  browser ' + bReason] = (tally['  browser ' + bReason] || 0) + 1;
       tally[bucket] = (tally[bucket] || 0) + 1;
       const reason = (first.error || '').replace(/\(.*\)/, '').trim() || (second.page ? 'little text' : 'failed');
       tally['  plain failure: ' + reason] = (tally['  plain failure: ' + reason] || 0) + 1;
