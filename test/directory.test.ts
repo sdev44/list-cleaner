@@ -3,7 +3,7 @@ import { MockClassifier } from '../src/core/jev.js';
 import { runJob } from '../src/core/pipeline.js';
 import { ClassifierAuthError, type ClassifierRequest, type Row } from '../src/core/types.js';
 import { reachOf, reviewPriority, areaLink, bestLink, decideWithJev, directoryTemplate, isBorderline, keywordScore, keywordStage, mergeAnswers, prefilter, reachHint } from '../src/templates/directory/index.js';
-import { buildProfile, parseDirectoryRules, STORM_PRESET, termsFromRows } from '../src/templates/directory/rules.js';
+import { buildProfile, nameConflicts, parseDirectoryRules, STORM_PRESET, termsFromRows } from '../src/templates/directory/rules.js';
 
 const S = STORM_PRESET;
 
@@ -206,6 +206,15 @@ describe('starter rules', () => {
     expect(r.coreCategories).toContain('pet groomer');
     expect(r.excludeCategory).not.toContain('animal');
     expect(parseDirectoryRules(r).niche).toBe('dog grooming');
+  });
+  it('flags trade words in other trades\u2019 names, but not place names (NI: "male" yes, "armagh" no)', () => {
+    const G = { ...S, niche: 'dog grooming', strongName: '\\b(groom)', coreCategories: ['pet groomer'] };
+    const rows = [
+      { name: 'AC Male Grooming Armagh', category: 'Barber shop', address: '1 Main St, Armagh BT61 7AA' },
+      { name: 'Luxe Male Grooming Armagh', category: 'Barber shop', address: '2 Main St, Armagh BT61 7AB' },
+      { name: 'Happy Paws Grooming', category: 'Pet groomer', address: '3 High St, Lisburn BT28 1AA' }
+    ];
+    expect(nameConflicts(rows, G, ['barber shop'])).toEqual(['\\bmale\\b']);
   });
   it('uses the storm preset for storm searches', () => {
     expect(buildProfile('', termsFromRows([{ search_term: 'storm shelter installers; safe room builders' }])).niche).toBe(S.niche);

@@ -265,9 +265,12 @@ export function applyCategoryVerdicts(S: DirectoryRules, verdicts: CategoryVerdi
 }
 
 /** Words in matching-looking names that only appear in other trades (e.g. "gents" in "Gents Grooming", a barber). */
-export function nameConflicts(rows: { name?: string; category?: string }[], S: DirectoryRules, otherCategoryKeys: string[]): string[] {
+export function nameConflicts(rows: { name?: string; category?: string; address?: string; search_location?: string }[], S: DirectoryRules, otherCategoryKeys: string[]): string[] {
   const C = compile(S), other = new Set(otherCategoryKeys);
   const words = (n: unknown) => String(n || '').toLowerCase().split(/[^a-z0-9']+/).map(w => w.replace(/'s$/, '')).filter(w => w.length >= 3 && !STOP.has(w));
+  // Place names (towns in addresses or searched locations, e.g. "Armagh") describe where, not what.
+  const places = new Set<string>();
+  for (const row of rows) for (const w of words(String(row.address || '') + ' ' + String(row.search_location || ''))) places.add(w);
   const genuine = new Set<string>(), counts: Record<string, number> = {};
   for (const row of rows) {
     const cat = String(row.category || '').toLowerCase();
@@ -278,5 +281,5 @@ export function nameConflicts(rows: { name?: string; category?: string }[], S: D
     if (!other.has(cat) || !C.strong.test(row.name || '')) continue;
     for (const w of new Set(words(row.name))) if (!C.strong.test(w)) counts[w] = (counts[w] || 0) + 1;
   }
-  return Object.entries(counts).filter(([w, n]) => n >= 2 && !genuine.has(w) && !/^\d+$/.test(w)).map(([w]) => '\\b' + esc(w) + '\\b');
+  return Object.entries(counts).filter(([w, n]) => n >= 2 && !genuine.has(w) && !places.has(w) && !/^\d+$/.test(w)).map(([w]) => '\\b' + esc(w) + '\\b');
 }
