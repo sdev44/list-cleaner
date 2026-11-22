@@ -127,6 +127,18 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(decideWithJev({ name: 'X', search_location: 'Kansas, USA' }, k('supplier', { serves_state: { choice: 'unclear' } }), 'KS', kw, S).result).toBe('Review');
   });
 
+  it('does not count the area inside a list of states (v8: Storm Shelters of Iowa, City Storm Shelter)', () => {
+    const al = { name: 'X', address: '7262 Governors W, Huntsville, AL 35806, United States' };
+    const list = 'Service Areas: the following states: Iowa Illinois Nebraska Missouri Minnesota North Dakota South Dakota Kansas Oklahoma Texas Arkansas Tennessee';
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, list, 475).result).toBe('Review');
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We install safe rooms across Kansas and Missouri.', 475).result).toBe('Clean');
+  });
+  it('treats a business just over the line as local (Kansas City, Missouri)', () => {
+    const kc = { name: 'SI Precast Concrete Products', address: '1 Main St, Kansas City, MO 64120, United States' };
+    expect(decideWithJev(kc, ans('partly'), 'KS', kw, S, 'Stock Number Weight Inside Outside 48 mi', 6)).toMatchObject({ result: 'Clean' });
+    expect(reachOf('Stock Number Weight 60 mi from base')).toBeNull();
+  });
+
   it('handles v6 radius wording: travel charges, speed promises, "outside the metro"', () => {
     expect(reachOf('$2.00 A MILE ROUND TRIP PER TRUCK FOR ANY JOB OVER 20 MILES bottom of page')?.miles).toBeUndefined();
     const ok = { name: 'Storm Safe', address: '1 Main St, Oklahoma City, OK 73102, United States' };

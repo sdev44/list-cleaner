@@ -1,6 +1,6 @@
 // Directory builder: "does this business really belong in my directory, in my area?"
 // Logic ported from the extension's cleaner (v2.5.5); behaviour kept identical except `protectPlausible`.
-import { inArea, regionName, rowArea, sameArea, searchedInArea } from '../../core/area.js';
+import { inArea, regionName, rowArea, sameArea, searchedInArea, US_STATES } from '../../core/area.js';
 import { sameSiteUrl, siteHost } from '../../core/site.js';
 import { milesFromArea, phoneArea } from '../../core/geo.js';
 import type { CheckContext, Template } from '../../core/template.js';
@@ -67,7 +67,7 @@ export function areaLink(page: Page): string {
 //  wide    nationwide, all 50 states, ships/delivers to a place
 //  near    surrounding/neighbouring states, a named region it serves
 const REACH: { kind: 'radius' | 'wide' | 'near'; re: RegExp }[] = [
-  { kind: 'radius', re: /\b(\d{2,4})[- ]?(?:miles?|mi)\b(?:[- ]radius)?(?=[^.!?|]{0,60}\b(?:from|of|around|radius|away|our)\b)|\b(?:within|up to|radius of)\s+(?:a\s+)?(\d{2,4})[- ]?(?:miles?|mi)\b/i },
+  { kind: 'radius', re: /\b(\d{2,4})[- ]?miles?\b(?:[- ]radius)?(?=[^.!?|]{0,60}\b(?:from|of|around|radius|away|our)\b)|\b(?:within|up to|radius of)\s+(?:a\s+)?(\d{2,4})[- ]?miles?\b/i },
   { kind: 'wide', re: /\b(nationwide|all 50 states|across the (?:us|u\.s\.|usa|united states|country)|anywhere in the (?:us|u\.s\.|country)|(?:we|will) (?:deliver|ship)\b[^.!?|]{0,40}\b(?:to|across|throughout|anywhere|nationwide)\b|(?:free |nationwide )?(?:delivery|shipping) (?:to|across|available|nationwide)|drop[- ]?ship\w*)/i },
   { kind: 'near', re: /\b((?:serv(?:e|es|ing)|install(?:s|ing)?|work(?:s|ing)?) (?:in |across |throughout )?(?:the )?(?:surrounding|neighbou?ring|nearby|multiple|several|adjacent) (?:states|areas|counties)|surrounding states|neighbou?ring states (?:including|such as|like)|tri[- ]state area|(?:installations?|installs|deliver(?:y|ies)|jobs?|projects?) (?:located )?outside (?:the |our )?[\w .'-]{0,30}?(?:metro|area|city|county|region))/i }
 ];
@@ -102,9 +102,23 @@ export function reachOf(text: string): Reach | null {
 /** The quoted sentence only (kept for callers that just need the evidence). */
 export const reachHint = (text: string): string => reachOf(text)?.quote || '';
 
-/** Does the site name the area (or a nationwide reach) at all? */
-export const mentionsArea = (text: string, area: string): boolean =>
-  !!area && new RegExp('\\b' + regionName(area).replace(/\s+/g, '\\s+') + '\\b', 'i').test(text);
+const STATE_NAMES = new RegExp('\\b(' + Object.values(US_STATES).join('|') + ')\\b', 'gi');
+
+/**
+ * Does the site name the area as a place it serves? A mention inside a list of other states
+ * ("we've installed in Alabama, Arkansas, … Kansas, Kentucky …", a dealer menu) doesn't count.
+ */
+export const mentionsArea = (text: string, area: string): boolean => {
+  if (!area) return false;
+  const t = String(text || '').replace(/\s+/g, ' ');
+  const re = new RegExp('\\b' + regionName(area).replace(/\s+/g, '\\s+') + '\\b', 'gi');
+  for (const m of t.matchAll(re)) {
+    const around = t.slice(Math.max(0, m.index! - 120), m.index! + m[0].length + 120);
+    const others = new Set([...around.matchAll(STATE_NAMES)].map(x => x[0].toLowerCase()).filter(x => x !== regionName(area).toLowerCase()));
+    if (others.size < 3) return true;
+  }
+  return false;
+};
 
 // ---------- stage 2: keywords ----------
 
@@ -253,6 +267,9 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
       result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)})` + (sameArea(rowArea(row), area) ? '' : noAddressState && serves !== 'yes' ? '; no address, ' + (phoneState ? `${where} phone number` : `found in ${where} searches`) : '; serves ' + where)
     };
     const reach = reachOf(siteText);
+    // Just over the line (e.g. Kansas City, Missouri): one metro area, so Jev's yes or partly is enough.
+    if (distance !== null && distance > 0 && distance <= 25 && (serves === 'yes' || serves === 'partly'))
+      return { result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)}); based about ${distance} miles from ${where}` };
     if (serves === 'yes') {
       // Based elsewhere: Jev's "yes" needs backing from the site, or the business must be close.
       // Naming the area or a radius that reaches counts; nationwide shipping alone does not (not a local installer).
