@@ -12,9 +12,11 @@ export const US_STATES: Record<string, string> = {
 };
 /** UK nations use 3-letter codes so they never clash with US state codes. "UK" means any nation. */
 export const UK_NATIONS: Record<string, string> = { UK: 'United Kingdom', ENG: 'England', SCT: 'Scotland', WLS: 'Wales', NIR: 'Northern Ireland' };
+/** Places recognised only so they count as outside a UK/US target (never a target themselves yet). */
+export const OTHER_AREAS: Record<string, string> = { IRL: 'Republic of Ireland' };
 export const AREAS: Record<string, string> = { ...US_STATES, ...UK_NATIONS };
 
-export const regionName = (code: string): string => AREAS[code] || code || '';
+export const regionName = (code: string): string => AREAS[code] || OTHER_AREAS[code] || code || '';
 
 /** Does a business's state/nation count as inside the target area? */
 export const sameArea = (code: string, target: string): boolean =>
@@ -27,15 +29,35 @@ export function areaCode(value: unknown): string {
   return Object.keys(AREAS).find(k => k === v.toUpperCase() || AREAS[k].toLowerCase() === v.toLowerCase()) || '';
 }
 
-/** UK postcode -> nation, by postcode area (border districts approximated). */
-export function ukNation(address: unknown): string {
-  const m = String(address || '').toUpperCase().match(/\b([A-Z]{1,2})(\d{1,2})[A-Z]?\s*\d[A-Z]{2}\b/);
-  if (!m) return /\b(UK|United Kingdom)\s*$/i.test(String(address || '')) ? 'UK' : '';
-  const area = m[1], district = Number(m[2]);
+const nationOfPostcodeArea = (area: string, district: number): string => {
   if (area === 'BT') return 'NIR';
   if (['AB', 'DD', 'DG', 'EH', 'FK', 'G', 'HS', 'IV', 'KA', 'KW', 'KY', 'ML', 'PA', 'PH', 'ZE'].includes(area) || (area === 'TD' && district <= 14)) return 'SCT';
   if (['CF', 'LD', 'LL', 'NP', 'SA'].includes(area) || (area === 'SY' && district >= 15)) return 'WLS';
   return 'ENG';
+};
+
+/** UK postcode -> nation, by postcode area (border districts approximated). Also reads part postcodes and nation names. */
+export function ukNation(address: unknown): string {
+  const a = String(address || '');
+  const upper = a.toUpperCase();
+  const full = upper.match(/\b([A-Z]{1,2})(\d{1,2})[A-Z]?\s*\d[A-Z]{2}\b/);
+  if (full) return nationOfPostcodeArea(full[1], Number(full[2]));
+  const isUk = /\b(UK|United Kingdom|Great Britain|Northern Ireland|England|Scotland|Wales)\s*$/i.test(a.replace(/,\s*$/, ''));
+  // Part postcode ("Dundonald, Northern Ireland BT18, United Kingdom") in a UK address.
+  const part = isUk ? upper.match(/(?:^|[\s,])([A-Z]{1,2})(\d{1,2})[A-Z]?(?=\s*(?:,|$))/) : null;
+  if (part && /^(BT|[A-Z]{1,2})$/.test(part[1]) && part[1] !== 'UK') return nationOfPostcodeArea(part[1], Number(part[2]));
+  if (/\bNorthern Ireland\b/i.test(a)) return 'NIR';
+  if (/\bScotland\b/i.test(a)) return 'SCT';
+  if (/\bWales\b/i.test(a) && !/New South Wales/i.test(a)) return 'WLS';
+  if (/\bEngland\b/i.test(a)) return 'ENG';
+  return isUk ? 'UK' : '';
+}
+
+/** Republic of Ireland address: an Eircode, or ending "Ireland" without "Northern". */
+export function isIrelandAddress(address: unknown): boolean {
+  const a = String(address || '').trim();
+  if (/\bNorthern Ireland\b/i.test(a)) return false;
+  return /\b[AC-FHKNPRTV-Y]\d{2}\s?[0-9AC-FHKNPRTV-Y]{4}\b/i.test(a) || /,\s*(Ireland|Éire|Eire|IE)\s*$/i.test(a) || /\bCo\.\s+[A-Z][a-z]+/.test(a);
 }
 
 /** The business's own state/nation, from its State field or address. */
@@ -45,7 +67,8 @@ export function rowArea(row: Row): string {
   const m = address.match(/,\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?(?:,\s*(?:USA|United States))?\s*$/);
   if (m && US_STATES[m[1]]) return m[1];
   const uk = ukNation(address);
-  return uk && uk !== 'UK' ? uk : '';
+  if (uk && uk !== 'UK') return uk;
+  return isIrelandAddress(address) ? 'IRL' : '';
 }
 
 /** Most common area among rows that have one. */

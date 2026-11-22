@@ -22,11 +22,20 @@ describe('area', () => {
     expect(ukNation('Edinburgh EH1 1YZ')).toBe('SCT');
     expect(ukNation('Cardiff CF10 1AA')).toBe('WLS');
     expect(ukNation('Grimsby DN31 1HU')).toBe('ENG');
+    // Part postcodes and nation names (from the Northern Ireland dog grooming batch).
+    expect(ukNation('102 Ballyregan Rd, Dundonald, Northern Ireland BT18, United Kingdom')).toBe('NIR');
+    expect(ukNation('Main St, Newry, Northern Ireland')).toBe('NIR');
+    expect(ukNation('3 Bridge St, Donaghadee BT21 0AD, United Kingdom')).toBe('NIR');
+    expect(ukNation('Sydney, New South Wales, Australia')).toBe('');
   });
   it('finds a row area from State or address', () => {
     expect(rowArea({ address: '608 Chestnut St, Burden, KS 67019, United States' })).toBe('KS');
     expect(rowArea({ state: 'Missouri' })).toBe('MO');
     expect(rowArea({ address: '' })).toBe('');
+    expect(rowArea({ address: 'Millmount, Crocknahattin, Bailieborough, Co. Cavan, A82 NX22, Ireland' })).toBe('IRL');
+    expect(rowArea({ address: "1 Cranmer Grove, Buncrana, Co. Donegal, F93 YP79, Ireland" })).toBe('IRL');
+    expect(rowArea({ address: '102 Ballyregan Rd, Dundonald, Northern Ireland BT18, United Kingdom' })).toBe('NIR');
+    expect(inArea({ address: 'Unit 5, Doorly Park, Sligo, F91 K65F, Ireland', search_location: 'Northern Ireland, UK' }, 'NIR')).toBe(false);
     expect(guessArea([{ state: 'KS' }, { state: 'KS' }, { state: 'MO' }])).toBe('KS');
   });
   it('counts no-address businesses found by area searches as in the area', () => {
