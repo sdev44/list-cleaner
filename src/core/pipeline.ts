@@ -19,6 +19,8 @@ export interface RunOptions<R> {
   concurrency?: number;
   /** Results from an earlier, interrupted run (same row order). Finished rows are skipped. */
   previous?: (RowResult | null)[];
+  /** Longest one business may take before it goes to Review (default 4 minutes). */
+  checkTimeoutMs?: number;
   /** Only check this many businesses after the free stage (for test runs). */
   limit?: number;
   signal?: AbortSignal;
@@ -58,7 +60,13 @@ export async function runJob<R>(opts: RunOptions<R>): Promise<RunSummary> {
       const i = queue.shift()!;
       let result: RowResult;
       try {
-        result = { ...(await template.check(rows[i], ctx)), stage: 'checked' };
+        let timer: NodeJS.Timeout | undefined;
+        const limit = opts.checkTimeoutMs ?? 240000;
+        const decision = await Promise.race([
+          template.check(rows[i], ctx),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`took longer than ${Math.round(limit / 1000)}s`)), limit); })
+        ]).finally(() => clearTimeout(timer));
+        result = { ...decision, stage: 'checked' };
       } catch (e) {
         const err = e as Error & { code?: string };
         if (err.code === 'auth') { fatal = err; queue.unshift(i); break; }

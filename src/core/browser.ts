@@ -65,6 +65,12 @@ export async function makeContext(browser: Browser, style: ContextStyle = { fixU
   return context;
 }
 
+/** Resolves with `fallback` if `work` takes longer than `ms`. */
+function withTimeout<T>(work: Promise<T>, ms: number, fallback: () => T): Promise<T> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([work, new Promise<T>(r => { timer = setTimeout(() => r(fallback()), ms); })]).finally(() => clearTimeout(timer));
+}
+
 function slots(limit: number) {
   let inUse = 0;
   const waiters: (() => void)[] = [];
@@ -74,9 +80,14 @@ function slots(limit: number) {
   };
 }
 
+/**
+ * Reads one page. Every step has a time limit, and the whole read is capped, so a page that hangs
+ * (endless scripts, a stuck renderer) can never stall a run. A stuck tab is closed in the background.
+ */
 export async function readWith(context: BrowserContext, url: string, timeout: number, settle: number): Promise<BrowserReadResult> {
-  const page = await context.newPage().catch(() => null);
-  try {
+  let page: import('playwright-core').Page | null = null;
+  const work = (async (): Promise<BrowserReadResult> => {
+    page = await context.newPage().catch(() => null);
     if (!page) return { page: null, error: 'Could not open a tab' };
     let status: number | undefined, navError = '';
     try {
@@ -92,10 +103,15 @@ export async function readWith(context: BrowserContext, url: string, timeout: nu
     if (!/^https?:/.test(finalUrl)) return { page: null, error: navError || 'Did not load', status };
     // Like the extension's tab, use whatever the page shows, even on an error status:
     // some sites send 404/406/503 while still showing their normal content. The caller checks the text.
-    const html = (await page.content()).slice(0, 1_500_000);
-    return { page: { html, url: finalUrl }, status, error: navError || (status && status >= 400 ? `HTTP ${status}` : undefined) };
-  } catch (e) { return { page: null, error: String((e as Error).message).split('\n')[0] }; }
-  finally { await page?.close().catch(() => {}); }
+    const html = await withTimeout(page.content(), 10000, () => '');
+    if (!html) return { page: null, error: 'Page did not respond', status };
+    return { page: { html: html.slice(0, 1_500_000), url: finalUrl }, status, error: navError || (status && status >= 400 ? `HTTP ${status}` : undefined) };
+  })().catch(e => ({ page: null, error: String((e as Error).message).split('\n')[0] }) as BrowserReadResult);
+  const result = await withTimeout(work, timeout + settle + 25000, () => ({ page: null, error: 'Browser read took too long' }));
+  // Never wait long for a tab to close: a hung tab is left to the browser to clean up.
+  const p = page as import('playwright-core').Page | null;
+  if (p) await withTimeout(p.close({ runBeforeUnload: false }).catch(() => {}), 5000, () => undefined);
+  return result;
 }
 
 /** Starts a headless browser, or returns null (with the reason) when none is available. */
@@ -128,7 +144,7 @@ export async function createBrowserReader(opts: BrowserOptions = {}): Promise<{ 
       try { result = { ...(await readWith(context, url, timeout, settle)), tier: 1 }; }
       finally { tier1.give(); }
       if (opts.retryVisible === false || !RETRYABLE.test(result.error || '')) return result;
-      const s = await startSecond();
+      const s = await withTimeout(startSecond(), 30000, () => null);
       if (!s) return result;
       await tier2.take();
       try {

@@ -122,7 +122,11 @@ async function cmdClean(input: string, v: Record<string, unknown>) {
   let lastSave = Date.now(), lastLog = 0;
   const save = () => writeFile(statePath, JSON.stringify({ fingerprint, results }));
   const controller = new AbortController();
-  process.once('SIGINT', () => { log('\nStopping after the current businesses… (progress is saved)'); controller.abort(); });
+  let stops = 0;
+  process.on('SIGINT', () => {
+    if (++stops > 1) { log('\nStopped. Progress up to the last few seconds is saved; run the same command to carry on.'); void save().finally(() => process.exit(130)); return; }
+    log('\nStopping after the current businesses… (press Ctrl+C again to stop now; progress is saved)'); controller.abort();
+  });
 
   const summary = await runJob({
     rows, template, rules, area, classifier, previous, browser: browser ? (u: string) => browser.read(u) : undefined,

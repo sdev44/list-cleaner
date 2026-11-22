@@ -14,7 +14,7 @@ export class JevClient implements Classifier {
   }
 
   async ask(request: ClassifierRequest): Promise<ClassifierResponse> {
-    const retries = this.opts.retries ?? 5;
+    const retries = this.opts.retries ?? 4;
     for (let attempt = 0; attempt < retries; attempt++) {
       if (this.opts.signal?.aborted) throw new Error('Stopped');
       let res: Response;

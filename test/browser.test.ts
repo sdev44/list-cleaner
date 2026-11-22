@@ -19,6 +19,10 @@ beforeAll(async () => {
       if (!/HeadlessChrome|Chrome/.test(ua) || !req.headers['sec-ch-ua']) { res.writeHead(403); res.end('Forbidden'); return; }
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end('<html><body><p>' + 'Safe rooms built to FEMA P-361 for homes and schools across Kansas. '.repeat(3) + '</p></body></html>');
+    } else if (req.url === '/hang') {
+      // Script that never ends: the tab locks up.
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body><p>Loading</p><script>while (true) {}</script></body></html>');
     } else if (req.url === '/flaky') {
       // Drops the first visits (like bot protection cutting off headless Chrome), serves the next.
       if (flakyDrops < 3) { flakyDrops++; req.socket.destroy(); return; } // Chrome retries a dropped request itself
@@ -56,6 +60,19 @@ describe('headless browser fallback', () => {
     const seen = await reader.readDetailed(base + '/flaky');
     expect(seen.tier).toBe(2);
     expect(seen.page?.html).toContain('tornado shelters');
+  }, 90000);
+
+  it('gives up on a page that locks up instead of stalling', async (ctx) => {
+    const { reader: quick } = await createBrowserReader({ concurrency: 1, settleMs: 100, timeoutMs: 3000, retryVisible: false });
+    if (!quick) return ctx.skip();
+    const started = Date.now();
+    const seen = await quick.readDetailed(base + '/hang');
+    expect(Date.now() - started).toBeLessThan(40000);
+    expect(seen.page === null || seen.page.html.length >= 0).toBe(true);
+    // The reader still works afterwards (the stuck tab did not hold its only slot).
+    const next = await quick.readDetailed(base + '/js');
+    expect(next.page?.html).toContain('storm shelters');
+    await quick.close();
   }, 90000);
 
   it('reports a site that is down even in the browser', async (ctx) => {

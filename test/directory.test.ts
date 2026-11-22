@@ -125,6 +125,14 @@ describe('pipeline (mocked web + Jev)', () => {
     const second = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', classifier: ok, fetcher, previous: first.results });
     expect(second.results.every(Boolean)).toBe(true);
   });
+  it('sends a business that never finishes to Review and carries on', async () => {
+    const slow = { ...directoryTemplate, check: async (row: Row) => row.place_key === '1' ? new Promise<never>(() => {}) : directoryTemplate.check(row, { rules: S, area: 'KS', readSite: async () => ({ ok: false, kind: 'none' as const, status: 'No website', text: '' }) }) };
+    const { results } = await runJob({ rows, template: slow, rules: S, area: 'KS', fetcher, checkTimeoutMs: 200 });
+    expect(results[0]?.outcome).toBe('review');
+    expect(results[0]?.reason).toMatch(/took longer than/);
+    expect(results[3]).not.toBeNull();
+  });
+
   it('honours --limit', async () => {
     const { counts } = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher, limit: 1 });
     expect(counts.unchecked).toBe(2);
