@@ -58,41 +58,56 @@ export type FetchHtml = (url: string) => Promise<FetchedPage | null>;
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
 
-/** Plain HTTP fetch with timeout and size cap. Returns null on any failure. */
-export const fetchHtml: FetchHtml = async (url) => {
+/** Plain HTTP fetch with timeout and size cap. Returns the page, or why it failed. */
+export async function fetchDetailed(url: string): Promise<{ page: FetchedPage | null; error?: string }> {
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(20000), redirect: 'follow',
       headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8', 'Accept-Language': 'en-GB,en;q=0.9' }
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { page: null, error: `HTTP ${res.status}` + (res.headers.get('server') ? ` (${res.headers.get('server')})` : '') };
     const type = res.headers.get('content-type') || '';
-    if (type && !/html|text/i.test(type)) return null;
-    return { html: (await res.text()).slice(0, 1_500_000), url: res.url || url };
-  } catch { return null; }
-};
+    if (type && !/html|text/i.test(type)) return { page: null, error: 'Not a web page: ' + type.split(';')[0] };
+    return { page: { html: (await res.text()).slice(0, 1_500_000), url: res.url || url } };
+  } catch (e) {
+    const err = e as Error & { cause?: { code?: string; message?: string } };
+    if (err.name === 'TimeoutError') return { page: null, error: 'Timed out' };
+    return { page: null, error: err.cause?.code || err.cause?.message || err.message };
+  }
+}
+
+export const fetchHtml: FetchHtml = async (url) => (await fetchDetailed(url)).page;
 
 /** Chooses one inner page worth reading after the homepage ('' = none). Supplied by the template. */
 export type InnerPagePicker = (page: Page) => string;
 
+/** Opens a page in a real (headless) browser. See browser.ts. */
+export type BrowserRead = (url: string) => Promise<FetchedPage | null>;
+
 /**
  * Reads a business's homepage and, if the template picks one, one inner page.
+ * When the plain request fails or comes back nearly empty, and a browser is available, the page is
+ * read in the browser instead (as the extension's hidden tab did).
  * Status strings match the extension so old and new results can be compared.
  */
-export async function readSite(row: Row, pickInner: InnerPagePicker, fetcher: FetchHtml = fetchHtml): Promise<SiteRead> {
+export async function readSite(row: Row, pickInner: InnerPagePicker, fetcher: FetchHtml = fetchHtml, browser?: BrowserRead): Promise<SiteRead> {
   const kind = websiteKind(row.website);
   if (kind === 'none') return { ok: false, kind, status: 'No website', text: '' };
   if (kind === 'social') return { ok: false, kind, status: 'Social/listing page only', text: '' };
   const url = normaliseUrl(row.website);
   if (!url) return { ok: false, kind, status: 'Website address not valid', text: '' };
-  const home = (await fetcher(url)) || (await fetcher(url.startsWith('https:') ? url.replace(/^https:/, 'http:') : url.replace(/^http:/, 'https:')));
-  // TODO(v1.1): headless-browser fallback for sites that block plain requests or render with JavaScript.
-  if (!home) return { ok: false, kind, status: 'Website unreachable', text: '' };
+  let home = (await fetcher(url)) || (await fetcher(url.startsWith('https:') ? url.replace(/^https:/, 'http:') : url.replace(/^http:/, 'https:')));
+  let viaBrowser = false;
+  if (browser && (!home || readPage(home.html, home.url).text.length < 80)) {
+    const seen = await browser(url);
+    if (seen && (!home || readPage(seen.html, seen.url).text.length > readPage(home.html, home.url).text.length)) { home = seen; viaBrowser = true; }
+  }
+  if (!home) return { ok: false, kind, status: browser ? 'Website unreachable (also tried in a browser tab)' : 'Website unreachable', text: '' };
   const page = readPage(home.html, home.url);
-  let text = page.text, status = 'Read homepage';
+  let text = page.text, status = viaBrowser ? 'Read homepage in a browser tab' : 'Read homepage';
   const inner = pickInner(page);
   if (inner) {
-    const more = await fetcher(inner);
+    const more = (await fetcher(inner)) || (viaBrowser && browser ? await browser(inner) : null);
     if (more) { text = readPage(more.html, more.url).text.slice(0, 4000) + ' || HOMEPAGE: ' + text; status += ' + ' + new URL(more.url).pathname; }
   }
   if (text.length < 80) return { ok: false, kind, status: 'Website has almost no readable text', text };

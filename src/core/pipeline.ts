@@ -1,6 +1,6 @@
 // Runs a template over a list: free stage for everything, then checks with limited concurrency.
 import type { Template } from './template.js';
-import { readSite, fetchHtml, type FetchHtml } from './site.js';
+import { readSite, fetchHtml, type BrowserRead, type FetchHtml } from './site.js';
 import type { Classifier, Decision, Row } from './types.js';
 
 export interface RowResult extends Decision {
@@ -14,6 +14,8 @@ export interface RunOptions<R> {
   area: string;
   classifier?: Classifier;
   fetcher?: FetchHtml;
+  /** Headless browser fallback for sites plain requests can't read. */
+  browser?: BrowserRead;
   concurrency?: number;
   /** Results from an earlier, interrupted run (same row order). Finished rows are skipped. */
   previous?: (RowResult | null)[];
@@ -48,7 +50,7 @@ export async function runJob<R>(opts: RunOptions<R>): Promise<RunSummary> {
 
   const ctx = {
     rules, area, classifier: opts.classifier,
-    readSite: (row: Row, pick: Parameters<typeof readSite>[1]) => readSite(row, pick, fetcher)
+    readSite: (row: Row, pick: Parameters<typeof readSite>[1]) => readSite(row, pick, fetcher, opts.browser)
   };
 
   const worker = async () => {

@@ -10,6 +10,8 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { areaCode, guessArea, regionName } from './core/area.js';
+import { createBrowserReader, type BrowserReader } from './core/browser.js';
+import { fetchDetailed, normaliseUrl, readPage, websiteKind } from './core/site.js';
 import { FIELDS, tableToRows } from './core/columns.js';
 import { writeResults } from './core/export.js';
 import { readSheets, readTable } from './core/io.js';
@@ -27,6 +29,7 @@ Commands
   rules <file>           Write starter rules (JSON) for this list
   suggest-rules <file>   Improve rules by asking Jev about the list's categories (needs JEV_API_KEY)
   inspect <file>         Show how columns were matched
+  diagnose <results>     Retry websites a results file couldn't read, and say why they failed
   compare <old...> <new> Compare Result columns (old can be several files, e.g. Clean Review Rejected)
 
 Options
@@ -39,6 +42,7 @@ Options
   --limit <n>            Only check the first n businesses after the free filter (test runs)
   --concurrency <n>      Businesses checked at once (default 6)
   --no-jev               Don't call Jev even if a key is set (uncertain businesses go to Review)
+  --no-browser           Don't open hard-to-read sites in headless Chrome (faster, reads fewer sites)
   --fresh                Ignore saved progress and start again
   -h, --help
 
@@ -109,7 +113,8 @@ async function cmdClean(input: string, v: Record<string, unknown>) {
     if (saved.fingerprint === fingerprint) { previous = saved.results; log(`Resuming: ${saved.results.filter(Boolean).length} businesses already done (use --fresh to start again).`); }
   }
 
-  log(`${rows.length} businesses · template: ${template.label} · area: ${area ? regionName(area) : 'none'} · Jev: ${classifier ? 'on' : 'off'}`);
+  const browser = await startBrowser(v);
+  log(`${rows.length} businesses · template: ${template.label} · area: ${area ? regionName(area) : 'none'} · Jev: ${classifier ? 'on' : 'off'} · browser: ${browser ? browser.name : 'off'}`);
   if (!classifier && !v['no-jev']) log('No JEV_API_KEY set: businesses that need a judgment go to Review.');
 
   const results: (RowResult | null)[] = previous ? [...previous] : rows.map(() => null);
@@ -119,7 +124,7 @@ async function cmdClean(input: string, v: Record<string, unknown>) {
   process.once('SIGINT', () => { log('\nStopping after the current businesses… (progress is saved)'); controller.abort(); });
 
   const summary = await runJob({
-    rows, template, rules, area, classifier, previous,
+    rows, template, rules, area, classifier, previous, browser: browser ? (u: string) => browser.read(u) : undefined,
     concurrency: Number(v.concurrency || 6), limit: v.limit !== undefined ? Number(v.limit) : undefined, signal: controller.signal,
     onResult: (i, r, p) => {
       results[i] = r;
@@ -128,6 +133,7 @@ async function cmdClean(input: string, v: Record<string, unknown>) {
     }
   });
   process.stderr.write('\n');
+  await browser?.close();
   summary.results.forEach((r, i) => { results[i] = r; });
   await save();
 
@@ -144,6 +150,67 @@ async function cmdClean(input: string, v: Record<string, unknown>) {
   if (classifier) log(`Jev: ${classifier.calls} calls, ${classifier.tokens.toLocaleString()} input tokens`);
   log(`Saved ${out}`);
   if (summary.error) { log('Stopped: ' + summary.error.message); process.exitCode = 2; }
+}
+
+
+async function startBrowser(v: Record<string, unknown>): Promise<BrowserReader | null> {
+  if (v['no-browser']) return null;
+  const { reader, error } = await createBrowserReader({ concurrency: 3 });
+  if (!reader) log('Headless browser not available, so hard-to-read sites will be skipped. ' + error);
+  return reader;
+}
+
+/** Retries every website a results file marked unreadable, plain request first, then the browser. */
+async function cmdDiagnose(input: string, v: Record<string, unknown>) {
+  const tables = input.toLowerCase().endsWith('.xlsx') ? (await readSheets(input)).map(s => s.table) : [await readTable(input)];
+  const targets: { name: string; website: string; check: string }[] = [];
+  for (const table of tables) {
+    const h = (table[0] || []).map(x => String(x ?? '').trim());
+    const ci = h.indexOf('Website Check'), ni = h.indexOf('Business Name'), wi = h.indexOf('Website');
+    if (ci < 0 || ni < 0 || wi < 0) continue;
+    for (const line of table.slice(1)) {
+      const check = String(line?.[ci] ?? '');
+      if (/^Website unreachable|^Website has almost no readable text/.test(check) && websiteKind(line?.[wi]) === 'site') targets.push({ name: String(line[ni]), website: String(line[wi]), check });
+    }
+  }
+  const list = v.limit ? targets.slice(0, Number(v.limit)) : targets;
+  log(`${targets.length} unreadable websites found${list.length < targets.length ? `, checking ${list.length}` : ''}.`);
+  const browser = await startBrowser(v);
+  if (browser) log(`Browser: ${browser.name}`);
+  const out: (string | number)[][] = [];
+  const tally: Record<string, number> = {};
+  let done = 0;
+  const queue = [...list];
+  const worker = async () => {
+    while (queue.length) {
+      const t = queue.shift()!;
+      const url = normaliseUrl(t.website);
+      const first = await fetchDetailed(url);
+      const second = first.page ? first : await fetchDetailed(url.startsWith('https:') ? url.replace(/^https:/, 'http:') : url.replace(/^http:/, 'https:'));
+      const plainText = second.page ? readPage(second.page.html, second.page.url).text.length : 0;
+      const plain = second.page ? (plainText < 80 ? `Read, but only ${plainText} characters` : `OK now (${plainText} characters)`) : (first.error || 'failed') + (second.error && second.error !== first.error ? ' / ' + second.error : '');
+      let viaBrowser = 'not tried', browserText = 0;
+      if (browser && (!second.page || plainText < 80)) {
+        const seen = await browser.read(url);
+        browserText = seen ? readPage(seen.html, seen.url).text.length : 0;
+        viaBrowser = !seen ? 'failed' : browserText < 80 ? `only ${browserText} characters` : 'OK';
+      }
+      const bucket = second.page && plainText >= 80 ? 'Plain request works now' : viaBrowser === 'OK' ? 'Fixed by browser' : 'Still unreadable';
+      tally[bucket] = (tally[bucket] || 0) + 1;
+      const reason = (first.error || '').replace(/\(.*\)/, '').trim() || (second.page ? 'little text' : 'failed');
+      tally['  plain failure: ' + reason] = (tally['  plain failure: ' + reason] || 0) + 1;
+      out.push([t.name, t.website, t.check, plain, viaBrowser, browserText, bucket]);
+      process.stderr.write(`\rChecked ${++done}/${list.length}   `);
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  process.stderr.write('\n');
+  await browser?.close();
+  for (const [k, n] of Object.entries(tally).sort((a, b) => (a[0].startsWith(' ') ? 1 : 0) - (b[0].startsWith(' ') ? 1 : 0) || b[1] - a[1])) log(`${String(n).padStart(5)}  ${k}`);
+  const path = String(v.out || stem(input) + '-diagnose.csv');
+  const { writeCsv } = await import('./core/io.js');
+  await writeCsv(path, ['Business Name', 'Website', 'Earlier Check', 'Plain Request', 'Browser', 'Browser Characters', 'Outcome'], out);
+  log(`Details saved to ${path}`);
 }
 
 async function cmdRules(input: string, v: Record<string, unknown>) {
@@ -237,7 +304,7 @@ async function main() {
     allowPositionals: true,
     options: {
       template: { type: 'string' }, area: { type: 'string' }, name: { type: 'string' }, rules: { type: 'string' }, out: { type: 'string' },
-      map: { type: 'string' }, limit: { type: 'string' }, concurrency: { type: 'string' }, 'no-jev': { type: 'boolean' }, fresh: { type: 'boolean' },
+      map: { type: 'string' }, limit: { type: 'string' }, concurrency: { type: 'string' }, 'no-jev': { type: 'boolean' }, 'no-browser': { type: 'boolean' }, fresh: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }
     }
   });
@@ -249,6 +316,7 @@ async function main() {
     case 'rules': need(1); return cmdRules(args[0], values);
     case 'suggest-rules': need(1); return cmdSuggest(args[0], values);
     case 'inspect': need(1); return cmdInspect(args[0], values);
+    case 'diagnose': need(1); return cmdDiagnose(args[0], values);
     case 'compare': need(2); return cmdCompare(args.slice(0, -1), args[args.length - 1], values);
     default: throw new Error(`Unknown command "${cmd}". See --help.`);
   }

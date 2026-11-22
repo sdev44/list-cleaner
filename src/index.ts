@@ -3,6 +3,7 @@ export * from './core/types.js';
 export * from './core/area.js';
 export * from './core/columns.js';
 export * from './core/site.js';
+export * from './core/browser.js';
 export * from './core/jev.js';
 export * from './core/template.js';
 export * from './core/pipeline.js';
