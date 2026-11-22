@@ -61,19 +61,21 @@ export function areaLink(page: Page): string {
   return local.find(l => AREA_LINK.test(l.href + ' ' + l.text))?.url || '';
 }
 
-const REACH = /\b(\d{2,4}[- ]?miles?\b|mile radius|radius|nationwide|all 50 states|across the (us|u\.s\.|country|midwest)|surrounding states|neighbou?ring states|we (deliver|ship|install|travel)\b[^.!?|]{0,40}\b(to|across|throughout|anywhere|states?)\b|(delivery|shipping) (to|across|available|nationwide)|drop[- ]?ship\w*|serv(e|ing|ice areas?)\b[^.!?|]{0,60}\b(states?|region|miles?|radius))/i;
+// What counts as a business saying it reaches beyond its base. Kinds, strongest first:
+//  radius  "up to 300 miles", "200-mile radius" (compared with the real distance)
+//  wide    nationwide, all 50 states, ships/delivers to a place
+//  near    surrounding/neighbouring states, a named region it serves
+const REACH: { kind: 'radius' | 'wide' | 'near'; re: RegExp }[] = [
+  { kind: 'radius', re: /\b(\d{2,4})[- ]?(?:miles?|mi)\b(?:[- ]radius)?(?=[^.!?|]{0,60}\b(?:from|of|around|radius|away|our)\b)|\b(?:within|up to|radius of)\s+(?:a\s+)?(\d{2,4})[- ]?(?:miles?|mi)\b/i },
+  { kind: 'wide', re: /\b(nationwide|all 50 states|across the (?:us|u\.s\.|usa|united states|country)|anywhere in the (?:us|u\.s\.|country)|(?:we|will) (?:deliver|ship)\b[^.!?|]{0,40}\b(?:to|across|throughout|anywhere|nationwide)\b|(?:free |nationwide )?(?:delivery|shipping) (?:to|across|available|nationwide)|drop[- ]?ship\w*)/i },
+  { kind: 'near', re: /\b((?:serv(?:e|es|ing)|install(?:s|ing)?|work(?:s|ing)?) (?:in |across |throughout )?(?:the )?(?:surrounding|neighbou?ring|nearby|multiple|several|adjacent) (?:states|areas|counties)|surrounding states|neighbou?ring states (?:including|such as|like)|tri[- ]state area)/i }
+];
 
-/**
- * The sentence saying the business reaches beyond its base (a mileage radius, delivery, shipping,
- * nationwide), centred on the words that matched so the reason quotes the evidence itself.
- */
-export function reachHint(text: string): string {
-  const t = String(text || '').replace(/\s+/g, ' ');
-  const m = REACH.exec(t);
-  if (!m) return '';
-  // Expand to the surrounding sentence, at most ~110 characters each side of the match.
+export interface Reach { kind: 'radius' | 'wide' | 'near'; quote: string; miles?: number }
+
+function quoteAround(t: string, index: number, length: number): string {
   const stops = /[.!?|•»«]/;
-  let start = m.index, end = m.index + m[0].length;
+  let start = index, end = index + length;
   for (let i = 0; i < 110 && start > 0 && !stops.test(t[start - 1]); i++) start--;
   for (let i = 0; i < 110 && end < t.length && !stops.test(t[end]); i++) end++;
   let out = t.slice(start, end).trim();
@@ -81,6 +83,25 @@ export function reachHint(text: string): string {
   if (end < t.length && !stops.test(t[end])) out = out.replace(/\s\S*$/, '') + '…';
   return out;
 }
+
+/** The business's own words about reaching beyond its base, with the stated radius when it gives one. */
+export function reachOf(text: string): Reach | null {
+  const t = String(text || '').replace(/\s+/g, ' ');
+  for (const { kind, re } of REACH) {
+    const m = re.exec(t);
+    if (!m) continue;
+    const n = Number(m[1] || m[2]);
+    return { kind, quote: quoteAround(t, m.index, m[0].length), ...(kind === 'radius' && n ? { miles: n } : {}) };
+  }
+  return null;
+}
+
+/** The quoted sentence only (kept for callers that just need the evidence). */
+export const reachHint = (text: string): string => reachOf(text)?.quote || '';
+
+/** Does the site name the area (or a nationwide reach) at all? */
+export const mentionsArea = (text: string, area: string): boolean =>
+  !!area && (new RegExp('\\b' + regionName(area).replace(/\s+/g, '\\s+') + '\\b', 'i').test(text) || /\b(nationwide|all 50 states)\b/i.test(text));
 
 // ---------- stage 2: keywords ----------
 
@@ -188,17 +209,37 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
     const result = S.partialArea === 'keep' ? 'Clean' : S.partialArea === 'remove' ? 'Rejected' : 'Review';
     return { result, reason: `Offers ${S.niche} (${pct(supplies)}); based outside ${where} but may reach it` + (why ? `: "${why}"` : '') } as const;
   };
+  const far = distance !== null && distance > 0 ? ` about ${distance} miles away` : ' elsewhere';
+  /** Weighs the site's own reach claim against the real distance. */
+  const judgeReach = (reach: Reach | null, jevSaysPartly: boolean) => {
+    if (reach?.miles && distance !== null && distance > 0) {
+      return reach.miles >= distance ? partial(reach.quote)
+        : { result: 'Rejected', reason: `Site gives a ${reach.miles}-mile reach but it is about ${distance} miles from ${where}: "${reach.quote}"` } as const;
+    }
+    if (reach && (reach.kind === 'wide' || distance === null || distance <= 300)) return partial(reach.quote);
+    if (jevSaysPartly) return partial('');
+    return null;
+  };
   if (pub >= S.publicReject && !kw.strong) return { result: 'Rejected', reason: `Public/community place, not a supplier (${pct(pub)})` };
   if (supplies <= S.jevLow) return { result: 'Rejected', reason: `Jev: does not offer ${S.niche} (${pct(supplies)})` };
   if (supplies >= S.jevHigh) {
-    if (inState || serves === 'yes') return {
+    if (inState) return {
       result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)})` + (sameArea(rowArea(row), area) ? '' : noAddressState && serves !== 'yes' ? '; no address, found in ' + where + ' searches' : '; serves ' + where)
     };
-    if (serves === 'partly') return partial(reachHint(siteText));
+    const reach = reachOf(siteText);
+    if (serves === 'yes') {
+      // Based elsewhere: Jev's "yes" needs backing from the site, or the business must be close.
+      const backed = mentionsArea(siteText, area) || (reach?.kind === 'wide') || (reach?.miles && distance !== null && reach.miles >= distance);
+      if (backed || (distance !== null && distance <= 150)) return { result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)}); serves ${where}` };
+      const judged = judgeReach(reach, false);
+      if (judged?.result === 'Rejected') return judged;
+      return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); Jev says it serves ${where}, but it is based${far} and its site doesn't say so` };
+    }
+    if (serves === 'partly') return judgeReach(reach, true)!;
     if (serves === 'no' && servesNo >= 0.6) {
-      // A stated radius, delivery or shipping can reach the area even when Jev says no: never reject on that.
-      const hint = reachHint(siteText);
-      if (hint) return partial(hint);
+      // A stated radius, delivery or shipping can reach the area even when Jev says no.
+      const judged = judgeReach(reach, false);
+      if (judged) return judged;
       // Close to the area: a person should decide, however confident Jev is.
       if (distance !== null && distance > 0 && S.nearbyMiles > 0 && distance <= S.nearbyMiles)
         return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); based about ${distance} miles from ${where}, no sign on its site of serving it` };
@@ -250,7 +291,7 @@ const TO_OUTCOME = { Clean: 'keep', Review: 'review', Rejected: 'remove' } as co
  */
 export function reviewPriority(reason: string, supplies: number | null, distance: number | null, strongName: boolean): number {
   const near = distance === null ? 0 : distance === 0 ? 8 : distance <= 50 ? 6 : distance <= 150 ? 3 : 0;
-  if (supplies !== null && /may reach it|service area unclear|miles from/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
+  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
   if (supplies !== null && /^Jev unsure/.test(reason)) return 50 + Math.round(supplies * 19) + Math.min(near, 5);
   if (/^Jev check failed|^Check failed|took longer/.test(reason)) return 45;
   return (strongName ? 40 : 20) + Math.min(near, 5);

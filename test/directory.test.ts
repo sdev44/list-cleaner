@@ -89,9 +89,36 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(d.result).toBe('Review');
     expect(d.reason).toMatch(/based outside Kansas but may reach it: ".*300 miles/);
   });
-  it('never rejects on area when the site mentions a radius or shipping', () => {
+  it('never rejects on area when the site mentions reach and the distance is unknown', () => {
     expect(decideWithJev(mo, ans('no', 0.9), 'KS', kw, S, valley).result).toBe('Review');
     expect(decideWithJev(mo, ans('no', 0.9), 'KS', kw, S, redZone).result).toBe('Rejected');
+  });
+  it('compares a stated radius with the real distance (Superior 300 vs 128; Valley 200 vs 475)', () => {
+    const ok = { name: 'Superior', address: '1 Main St, Norman, OK 73072, United States' };
+    expect(decideWithJev(ok, ans('partly'), 'KS', kw, S, superior, 128).result).toBe('Review');
+    const al = { name: 'Valley', address: '7262 Governors W, Huntsville, AL 35806, United States' };
+    const v = decideWithJev(al, ans('partly'), 'KS', kw, S, valley, 475);
+    expect(v.result).toBe('Rejected');
+    expect(v.reason).toMatch(/200-mile reach but it is about 475 miles from Kansas/);
+  });
+  it('does not take Jev\u2019s "yes" for a far-away business without backing from its site', () => {
+    const al = { name: 'Valley', address: '7262 Governors W, Huntsville, AL 35806, United States' };
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, valley, 475).result).toBe('Rejected');
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'Quality shelters for your family.', 475)).toMatchObject({ result: 'Review' });
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We install in Kansas, Missouri and Oklahoma.', 475).result).toBe('Clean');
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We ship nationwide.', 475).result).toBe('Clean');
+    expect(decideWithJev(mo, ans('yes'), 'KS', kw, S, 'Quality shelters.', 75).result).toBe('Clean');
+  });
+  it('ignores wording that is not about reach (from the v5 run)', () => {
+    for (const t of [
+      'We are an Oklahoma City Storm Shelters company at heart, however we serve the entire state of Oklahoma',
+      'require every shelter and safe room we install to prove itself twice over',
+      'parts of Arkansas are protected from tornados and devastating storms, Benton County, Central Arkansas, and neighboring states can\u2019t say the same',
+      'Proudly serving the Southwest region home based in Lubbock Texas',
+      'Rated for 250 mph winds. Founded 1999. Rebar every 12 inches.'
+    ]) expect(reachHint(t)).toBe('');
+    expect(reachHint('We install across the surrounding states.')).toMatch(/surrounding states/);
+    expect(reachHint('We deliver to Kansas, Missouri and Arkansas.')).toMatch(/deliver to Kansas/);
   });
   it('follows the partialArea setting', () => {
     expect(decideWithJev(mo, ans('partly'), 'KS', kw, { ...S, partialArea: 'keep' }, superior).result).toBe('Clean');
