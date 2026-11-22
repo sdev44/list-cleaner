@@ -224,6 +224,39 @@ describe('pipeline (mocked web + Jev)', () => {
     expect(results[3]).not.toBeNull();
   });
 
+  it('records evidence and re-decides from it with no website reads or Jev calls', async () => {
+    let fetches = 0;
+    const counting = async (u: string) => { fetches++; return fetcher(u); };
+    const outOfState: Row[] = [...rows, { name: 'Okie Storm Shelters', website: 'okie.example', address: '1 Main St, Tulsa, OK 74103, United States', category: 'Contractor', place_key: '9' }];
+    html['http://okie.example/'] = '<title>Okie Storm Shelters</title><body>Tornado shelters installed within 300 miles of Tulsa. Garage floor shelters, FEMA 361 safe rooms, free quotes.</body>';
+    const jev = new MockClassifier(req => {
+      const okie = JSON.stringify(req.state).includes('Okie');
+      return { supplies: { noul: 0.97 }, public_place: { noul: 0 }, serves_state: { choice: okie ? 'partly' : 'yes', probabilities: { no: 0 } }, role: { choice: 'provider' } };
+    });
+    const first = await runJob({ rows: outOfState, template: directoryTemplate, rules: S, area: 'KS', classifier: jev, fetcher: counting });
+    expect(first.results[4]?.outcome).toBe('review');
+    const readsBefore = fetches, asksBefore = jev.requests.length;
+
+    // New rule: partial reach counts as Clean. Re-decide from evidence only.
+    const again = await runJob({ rows: outOfState, template: directoryTemplate, rules: { ...S, partialArea: 'keep' }, area: 'KS', fetcher: counting, replay: first.evidence });
+    expect(fetches).toBe(readsBefore);
+    expect(jev.requests.length).toBe(asksBefore);
+    expect(again.results[4]?.outcome).toBe('keep');
+    expect(again.results[0]?.outcome).toBe('keep');
+    expect(again.replayed).toBe(first.results.filter(r => r?.stage === 'checked').length);
+    expect(again.needsFresh).toBe(0);
+  });
+
+  it('flags businesses whose new rules need a Jev answer the evidence lacks', async () => {
+    const first = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher });   // no Jev at all
+    const jev = new MockClassifier(() => ({ supplies: { noul: 0.9 }, serves_state: { choice: 'yes' } }));
+    const offline = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher, replay: first.evidence });
+    expect(offline.results[0]?.reason).toMatch(/^Keyword score/);   // decided as before, without Jev
+    const live = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher, replay: first.evidence, classifier: jev });
+    expect(live.results[0]?.reason).toMatch(/^Jev: offers/);
+    expect(jev.requests.length).toBe(1);
+  });
+
   it('honours --limit', async () => {
     const { counts } = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher, limit: 1 });
     expect(counts.unchecked).toBe(2);

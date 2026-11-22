@@ -50,6 +50,20 @@ The output workbook has **Clean**, **Review** and **Rejected** sheets (plus **No
 - **No key:** businesses that need a judgment go to Review (or Clean on a strong keyword score).
 - **Headless browser:** uses your installed Google Chrome (or Edge). Without either, run `npx playwright-core install chromium` once. `--no-browser` turns it off.
 
+## Changing rules without re-running (redecide)
+
+Every `clean` run saves what it saw next to its output: `out/kansas.xlsx.evidence.jsonl` holds each business's website text and Jev's answers. Change the rules, then re-sort the same list in seconds with no website reads and no Jev calls:
+
+```bash
+npm run cli -- redecide Kansas-All.xlsx --from out/kansas.xlsx --rules rules.json --out out/kansas-b.xlsx
+npm run cli -- compare out/kansas.xlsx out/kansas-b.xlsx
+```
+
+- Businesses the free filter now lets through have no evidence yet and are listed as **Not checked**. Add `--live` to check just those.
+- If the new rules need a Jev answer the evidence lacks, the business goes to Review ("Needs a fresh check"). `--live` asks Jev for those only.
+- `redecide` saves its own evidence file, so you can chain changes.
+- Lists with no search terms need `--name "What the directory lists"` (or `--rules`), for every command.
+
 ## Diagnosing unreadable websites
 
 ```bash
