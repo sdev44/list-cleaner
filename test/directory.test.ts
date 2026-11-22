@@ -298,6 +298,23 @@ describe('pipeline (mocked web + Jev)', () => {
     expect(jev.requests.length).toBe(1);
   });
 
+  it('sends a listing that uses another company\u2019s website to Review (City Storm Shelter / Ground Zero)', async () => {
+    const list: Row[] = [
+      { name: 'Ground Zero Shelters, Co.', website: 'https://www.groundzeroshelters.com/', place_key: 'g1' },
+      { name: 'City Storm Shelter', website: 'http://www.groundzeroshelters.com/oklahoma-city-storm-shelters.html', place_key: 'g2' },
+      { name: 'Tornado Place- Storm Shelters', website: 'http://www.tornadoplace.com/', place_key: 't1' },
+      { name: 'Tornado Place of Arkansas', website: 'http://www.tornadoplace.com/', place_key: 't2' }
+    ];
+    prefilter(list, S);
+    expect(list[1]._site_owner).toBe('Ground Zero Shelters, Co.');
+    expect(list[3]._site_owner).toBeUndefined(); // same company, another branch
+    const html2: Record<string, string> = { 'http://www.groundzeroshelters.com/oklahoma-city-storm-shelters.html': '<body>' + 'We install tornado shelters and safe rooms across Kansas and Oklahoma. '.repeat(3) + '</body>' };
+    const jev = new MockClassifier(() => ({ supplies: { noul: 0.95 }, serves_state: { choice: 'yes' }, kind: { choice: 'supplier', probabilities: { supplier: 1 } } }));
+    const { results: all } = await runJob({ rows: list, template: directoryTemplate, rules: S, area: 'KS', classifier: jev, fetcher: async u => html2[u] ? { html: html2[u], url: u } : null });
+    expect(all[1]?.outcome).toBe('review');
+    expect(all[1]?.reason).toMatch(/also used by Ground Zero Shelters/);
+  });
+
   it('honours --limit', async () => {
     const { counts } = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher, limit: 1 });
     expect(counts.unchecked).toBe(2);

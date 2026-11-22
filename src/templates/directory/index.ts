@@ -15,8 +15,27 @@ const pct = (n: number) => Math.round(n * 100) + '%';
 
 // ---------- stage 1: free filter ----------
 
+/** Words that say what a business does, not who it is ("storm", "shelters", "llc"): ignored when comparing names. */
+function nameWords(name: unknown, S: DirectoryRules): Set<string> {
+  const generic = new Set([...S.niche.toLowerCase().split(/[^a-z]+/), 'llc', 'inc', 'co', 'ltd', 'the', 'and', 'of', 'company', 'services', 'service', 'group']);
+  return new Set(String(name || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !generic.has(w) && !generic.has(w.replace(/s$/, ''))).map(w => w.replace(/s$/, '')));
+}
+
+/** Key under which the free filter notes "this website belongs to another business in the list". */
+export const SITE_OWNER = '_site_owner';
+
 export function prefilter(rows: Row[], S: DirectoryRules): string[] {
-  const C = compile(S), seen = new Set<string>();
+  const C = compile(S), seen = new Set<string>(), hostOwner = new Map<string, Row>();
+  for (const row of rows) {
+    delete row[SITE_OWNER];
+    const host = siteHost(row.website);
+    if (!host) continue;
+    const owner = hostOwner.get(host);
+    if (!owner) { hostOwner.set(host, row); continue; }
+    const a = nameWords(owner.name, S), b = nameWords(row.name, S);
+    // Different names (no shared distinctive word) on one website: probably another company's page.
+    if (a.size && b.size && ![...b].some(w => a.has(w))) row[SITE_OWNER] = String(owner.name);
+  }
   return rows.map(row => {
     const name = String(row.name || '').trim();
     const cat = String(row.category || '').toLowerCase() + ' ';
@@ -335,7 +354,7 @@ const TO_OUTCOME = { Clean: 'keep', Review: 'review', Rejected: 'remove' } as co
  */
 export function reviewPriority(reason: string, supplies: number | null, distance: number | null, strongName: boolean): number {
   const near = distance === null ? 0 : distance === 0 ? 8 : distance <= 50 ? 6 : distance <= 150 ? 3 : 0;
-  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves|mile reach and/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
+  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves|mile reach and|website is also used by/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
   if (supplies !== null && /^Jev unsure/.test(reason)) return 50 + Math.round(supplies * 19) + Math.min(near, 5);
   if (/^Jev check failed|^Check failed|took longer/.test(reason)) return 45;
   return (strongName ? 40 : 20) + Math.min(near, 5);
@@ -367,6 +386,8 @@ async function check(row: Row, ctx: CheckContext<DirectoryRules>): Promise<Decis
       }
     } else d = decideWithoutJev(row, kw, ctx.area, S);
   }
+  if (d.result === 'Clean' && row[SITE_OWNER])
+    d = { result: 'Review', reason: `Its website is also used by ${row[SITE_OWNER]}: this listing may be that company's page. ` + d.reason };
   if (d.result !== 'Rejected') fields.clean_services = servicesFor(row, site.text, S).join(', ');
   const supplies = typeof fields.clean_supplies === 'string' ? Number(fields.clean_supplies.replace('%', '')) / 100 : null;
   const priority = d.result === 'Review' ? reviewPriority(d.reason, supplies, distance, kw.strong) : undefined;
