@@ -24,36 +24,63 @@ function nameWords(name: unknown, S: DirectoryRules): Set<string> {
 /** Key under which the free filter notes "this website belongs to another business in the list". */
 export const SITE_OWNER = '_site_owner';
 
+/** Booking and site-builder platforms: many unrelated businesses share these hosts. */
+const PLATFORM_HOST = /(^|\.)(heygoldie\.com|fresha\.com|booksy\.com|setmore\.com|square\.site|squareup\.com|linktr\.ee|wixsite\.com|godaddysites\.com|business\.site|sites\.google\.com|calendly\.com|acuityscheduling\.com|vagaro\.com|simplybook\.\w+|gingrapp\.com|petsapp\.com|weebly\.com|wordpress\.com|blogspot\.com|carrd\.co|yell\.com|checkatrade\.com|bark\.com)$/i;
+
+/** How good a listing is for the directory, to decide which of two duplicates to keep. */
+function listingScore(row: Row, S: DirectoryRules): number {
+  const C = compile(S), cat = String(row.category || '').toLowerCase();
+  const reviews = Number(String(row.review_count || '').replace(/,/g, '')) || 0;
+  return (C.core.some(c => cat.includes(c)) ? 8 : 0) + (C.strong.test(row.name || '') ? 4 : 0) + (siteHost(row.website) ? 2 : 0) + Math.min(1.9, Math.log10(1 + reviews));
+}
+
 export function prefilter(rows: Row[], S: DirectoryRules): string[] {
-  const C = compile(S), seen = new Set<string>(), hostOwner = new Map<string, Row>();
-  for (const row of rows) {
+  const C = compile(S), seen = new Map<string, Row>(), hostOwner = new Map<string, Row>();
+  // With strictDuplicates, the best listing of a duplicate pair is kept (e.g. "The Groom Room" salon
+  // rather than the "Pets at Home" store it sits in). Legacy mode keeps list order, like the extension.
+  const order = rows.map((_, i) => i);
+  if (S.strictDuplicates) {
+    const score = rows.map(r => listingScore(r, S));
+    order.sort((a, b) => score[b] - score[a] || a - b);
+  }
+  // Website ownership: the listing that uses the homepage, then the one with more reviews.
+  const isHome = (u: unknown) => { try { return new URL(/^https?:/i.test(String(u)) ? String(u) : 'http://' + u).pathname.replace(/\/(index\.\w+)?$/, '') === ''; } catch { return false; } };
+  const reviews = (r: Row) => Number(String(r.review_count || '').replace(/,/g, '')) || 0;
+  const ownerOrder = rows.map((_, i) => i).sort((a, b) => (isHome(rows[b].website) ? 1 : 0) - (isHome(rows[a].website) ? 1 : 0) || reviews(rows[b]) - reviews(rows[a]) || a - b);
+  for (const i of ownerOrder) {
+    const row = rows[i];
     delete row[SITE_OWNER];
     const host = siteHost(row.website);
-    if (!host) continue;
+    if (!host || PLATFORM_HOST.test(host)) continue;
     const owner = hostOwner.get(host);
     if (!owner) { hostOwner.set(host, row); continue; }
     const a = nameWords(owner.name, S), b = nameWords(row.name, S);
     // Different names (no shared distinctive word) on one website: probably another company's page.
     if (a.size && b.size && ![...b].some(w => a.has(w))) row[SITE_OWNER] = String(owner.name);
   }
-  return rows.map(row => {
+  const reasons: string[] = rows.map(() => '');
+  for (const i of order) {
+    const row = rows[i];
     const name = String(row.name || '').trim();
     const cat = String(row.category || '').toLowerCase() + ' ';
     const phone = String(row.phone || '').replace(/\D/g, '');
     const host = siteHost(row.website);
+    const platform = !!host && PLATFORM_HOST.test(host);
     const ids = [row.place_id, row.place_key, phone && name.toLowerCase() + '|' + phone, host && 'site:' + host + '|' + simpleName(name),
-      S.strictDuplicates && phone.length >= 10 && host && 'phone+site:' + phone.slice(-10) + '|' + host].filter(Boolean).map(String);
+      S.strictDuplicates && !platform && phone.length >= 10 && host && 'phone+site:' + phone.slice(-10) + '|' + host].filter(Boolean).map(String);
     const protectedCat = S.protectPlausible && C.plausible.some(c => cat.includes(c));
+    const twin = ids.map(id => seen.get(id)).find(Boolean);
     let reason = '';
     if (!name) reason = 'No business name';
-    else if (ids.some(id => seen.has(id))) reason = 'Duplicate';
+    else if (twin) reason = S.strictDuplicates ? `Duplicate of ${twin.name}` : 'Duplicate';
     else if (/permanently closed/i.test(row.business_status || '')) reason = 'Permanently closed';
     else if (C.hardCats.some(c => cat.includes(c))) reason = 'Unrelated category: ' + row.category;
     else if (!C.strong.test(name) && !protectedCat && C.badCats.find(c => cat.includes(c))) reason = 'Unrelated category: ' + row.category;
     else if (C.badName && C.badName.test(name) && !C.core.some(c => cat.includes(c))) reason = 'Name shows a non-commercial or different kind of business';
-    ids.forEach(id => seen.add(id));
-    return reason;
-  });
+    ids.forEach(id => { if (!seen.has(id)) seen.set(id, row); });
+    reasons[i] = reason;
+  }
+  return reasons;
 }
 
 // ---------- website reading ----------

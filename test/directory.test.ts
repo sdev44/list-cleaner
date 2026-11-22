@@ -18,7 +18,7 @@ describe('free filter', () => {
       { name: 'Humane Society', place_key: 'e', category: 'Contractor' },
       { name: '', place_key: 'f' }
     ];
-    expect(prefilter(rows, S)).toEqual(['', 'Duplicate', 'Permanently closed', 'Unrelated category: Insurance agency', '',
+    expect(prefilter(rows, S)).toEqual(['', 'Duplicate of Acme Storm Shelters', 'Permanently closed', 'Unrelated category: Insurance agency', '',
       'Name shows a non-commercial or different kind of business', 'No business name']);
   });
   it('keeps plausible categories that clash with the soft exclude list (unless legacy mode)', () => {
@@ -237,7 +237,7 @@ describe('pipeline (mocked web + Jev)', () => {
     expect(results.map(r => r?.outcome)).toEqual(['keep', 'remove', 'remove', 'review']);
     expect(results[0]?.fields).toMatchObject({ clean_supplies: '97%', clean_role: 'provider', clean_serves: 'yes', clean_site_check: 'Read homepage' });
     expect(String(results[0]?.fields?.clean_services)).toContain('FEMA safe room builders');
-    expect(results[2]?.reason).toBe('Free filter: Duplicate');
+    expect(results[2]?.reason).toBe('Free filter: Duplicate of Good Storm Shelters');
     expect(counts).toEqual({ keep: 1, review: 1, remove: 2, unchecked: 0 });
     expect(jev.requests).toHaveLength(1);
     expect(results[0]?.fields?.clean_jev_asks).toBe(1);
@@ -313,6 +313,21 @@ describe('pipeline (mocked web + Jev)', () => {
     const { results: all } = await runJob({ rows: list, template: directoryTemplate, rules: S, area: 'KS', classifier: jev, fetcher: async u => html2[u] ? { html: html2[u], url: u } : null });
     expect(all[1]?.outcome).toBe('review');
     expect(all[1]?.reason).toMatch(/also used by Ground Zero Shelters/);
+  });
+
+  it('keeps the better listing of a duplicate pair, and ignores shared booking platforms (NI dog grooming)', () => {
+    const G = { ...S, niche: 'dog grooming', strongName: '\\b(groom)', coreCategories: ['pet groomer'] };
+    const list: Row[] = [
+      { name: 'Pets at Home Lisburn', category: 'Pet store', phone: '+44 345 850 9618', website: 'https://www.petsathome.com/find-us/lisburn' },
+      { name: 'The Groom Room Lisburn', category: 'Pet groomer', phone: '+44 345 850 9618', website: 'https://www.petsathome.com/find-us/lisburn-groom' },
+      { name: 'Country Tails Dog Grooming', category: 'Pet groomer', website: 'https://book.heygoldie.com/Country-Tails' },
+      { name: "Elena's Dog Grooming", category: 'Pet groomer', website: 'https://book.heygoldie.com/Elenas' }
+    ];
+    const r = prefilter(list, G);
+    expect(r[0]).toBe('Duplicate of The Groom Room Lisburn');
+    expect(r[1]).toBe('');
+    expect(list[3]._site_owner).toBeUndefined();
+    expect(list[2]._site_owner).toBeUndefined();
   });
 
   it('honours --limit', async () => {

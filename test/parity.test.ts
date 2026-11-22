@@ -35,11 +35,11 @@ describe('Kansas duplicates by phone + website', async () => {
   it('finds the RedGuard pair (SI Precast are branches with their own phones), and only adds duplicates', () => {
     const base = prefilter(rows, { ...STORM_PRESET, strictDuplicates: false });
     const strict = prefilter(rows, STORM_PRESET);
-    const added = rows.map((r, i) => !base[i] && strict[i] ? `${r.name} | ${r.website}` : '').filter(Boolean);
-    expect(strict.every((g, i) => !base[i] || !!g)).toBe(true); // everything removed before is still removed (reason may now say Duplicate)
-    expect(added.every(Boolean)).toBe(true);
-    expect(added.some(a => a.startsWith('SI Precast'))).toBe(false);
-    expect(added).toHaveLength(11);
-    expect(added.some(a => a.startsWith('RedGuard'))).toBe(true);
+    // 11 more removed in total; within a pair the better listing may now be the one kept (Survive-A-Storm).
+    expect(strict.filter(Boolean).length).toBe(base.filter(Boolean).length + 11);
+    expect(rows.filter((_, i) => base[i] && !strict[i]).map(r => r.name)).toEqual(['Survive-A-Storm Shelters']);
+    const redguard = rows.map((r, i) => r.name?.startsWith('RedGuard') ? strict[i] : null).filter(x => x !== null);
+    expect(redguard.filter(Boolean)).toHaveLength(1);
+    expect(rows.filter((r, i) => r.name?.startsWith('SI Precast') && /^Duplicate of SI/.test(strict[i])).length).toBe(0);
   });
 });
