@@ -30,6 +30,7 @@ Commands
   suggest-rules <file>   Improve rules by asking Jev about the list's categories (needs JEV_API_KEY)
   inspect <file>         Show how columns were matched
   diagnose <results>     Retry websites a results file couldn't read, and say why they failed
+  probe <url...>         Try one or more sites several ways, to see what a blocking site objects to
   compare <old...> <new> Compare Result columns (old can be several files, e.g. Clean Review Rejected)
 
 Options
@@ -216,6 +217,33 @@ async function cmdDiagnose(input: string, v: Record<string, unknown>) {
   log(`Details saved to ${path}`);
 }
 
+/** Tries one site several ways, to find out what a blocking site objects to. */
+async function cmdProbe(urls: string[]) {
+  const { chromium } = await import('playwright-core');
+  const { launch, makeContext, readWith } = await import('./core/browser.js');
+  const variants: { label: string; headless: boolean; args: string[]; style: Parameters<typeof makeContext>[1] }[] = [
+    { label: 'A headless, as v4 (fixed version, media blocked)', headless: true, args: ['--disable-blink-features=AutomationControlled'], style: { fixUserAgent: true, blockMedia: true, hideWebdriver: true } },
+    { label: 'B headless, nothing altered', headless: true, args: [], style: {} },
+    { label: 'C headless, HTTP/1.1', headless: true, args: ['--disable-http2'], style: { fixUserAgent: true } },
+    { label: 'D window, nothing altered', headless: false, args: ['--window-position=-32000,-32000'], style: {} },
+    { label: 'E window, automation signs hidden', headless: false, args: ['--window-position=-32000,-32000', '--disable-blink-features=AutomationControlled'], style: { hideWebdriver: true } }
+  ];
+  for (const raw of urls) {
+    const url = normaliseUrl(raw);
+    const plain = await fetchDetailed(url);
+    log(`\n${url}\n  plain request: ${plain.page ? `OK (${readPage(plain.page.html, plain.page.url).text.length} characters)` : plain.error}`);
+    for (const v of variants) {
+      const b = await launch(chromium, v.headless, v.args);
+      if ('error' in b) { log(`  ${v.label}: could not start (${b.error.split('\n')[0]})`); continue; }
+      const ctx = await makeContext(b.browser, v.style);
+      const r = await readWith(ctx, url, 25000, 3000);
+      const chars = r.page ? readPage(r.page.html, r.page.url).text.length : 0;
+      log(`  ${v.label}: ${r.page ? `${chars} characters` : 'failed'}${r.error ? ` (${r.error})` : ''}`);
+      await b.browser.close().catch(() => {});
+    }
+  }
+}
+
 async function cmdRules(input: string, v: Record<string, unknown>) {
   const template = getTemplate(String(v.template || 'directory'));
   const { rows } = await loadList(input, v.map as string | undefined);
@@ -320,6 +348,7 @@ async function main() {
     case 'suggest-rules': need(1); return cmdSuggest(args[0], values);
     case 'inspect': need(1); return cmdInspect(args[0], values);
     case 'diagnose': need(1); return cmdDiagnose(args[0], values);
+    case 'probe': need(1); return cmdProbe(args);
     case 'compare': need(2); return cmdCompare(args.slice(0, -1), args[args.length - 1], values);
     default: throw new Error(`Unknown command "${cmd}". See --help.`);
   }

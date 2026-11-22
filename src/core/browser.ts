@@ -5,9 +5,9 @@
 //
 // Two tiers:
 //  1. Headless Chrome (fast, up to 3 pages at once).
-//  2. Only for sites that cut the connection on tier 1 (bot protection spotting headless Chrome):
-//     a normal Chrome window parked off-screen, using HTTP/1.1, one page at a time. Started on first
-//     need. Where no screen exists (servers), it falls back to headless with HTTP/1.1.
+//  2. Only for sites that cut the connection on tier 1: a normal Chrome window parked off-screen with
+//     nothing altered (own user agent, no request interception), one page at a time. Started on first
+//     need. Where no screen exists (servers), it falls back to headless.
 import type { Browser, BrowserContext } from 'playwright-core';
 import { readPage, type FetchedPage } from './site.js';
 
@@ -24,7 +24,12 @@ export interface BrowserReader {
 
 export interface BrowserOptions { concurrency?: number; timeoutMs?: number; settleMs?: number; /** Allow tier 2 (default true). */ retryVisible?: boolean }
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
+/** A normal desktop Chrome user agent for the browser's real version (headless Chrome otherwise says "HeadlessChrome"). */
+export function realUserAgent(version: string): string {
+  const major = String(version).split('.')[0] || '142';
+  const os = process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : 'X11; Linux x86_64';
+  return `Mozilla/5.0 (${os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+}
 const BASE_ARGS = ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'];
 /** Failures that suggest the site dropped an automated visitor, worth a second, more human attempt. */
 const RETRYABLE = /ERR_HTTP2_PROTOCOL_ERROR|ERR_EMPTY_RESPONSE|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_HTTP_RESPONSE_CODE_FAILURE|HTTP 403|HTTP 429/;
@@ -32,7 +37,7 @@ const RETRYABLE = /ERR_HTTP2_PROTOCOL_ERROR|ERR_EMPTY_RESPONSE|ERR_CONNECTION_CL
 type Chromium = typeof import('playwright-core').chromium;
 const CHANNELS = [['chrome', 'Google Chrome'], ['msedge', 'Microsoft Edge'], [undefined, 'Playwright Chromium']] as const;
 
-async function launch(chromium: Chromium, headless: boolean, extraArgs: string[]): Promise<{ browser: Browser; name: string } | { error: string }> {
+export async function launch(chromium: Chromium, headless: boolean, extraArgs: string[]): Promise<{ browser: Browser; name: string } | { error: string }> {
   const errors: string[] = [];
   for (const [channel, label] of CHANNELS) {
     try { return { browser: await chromium.launch({ headless, channel, args: [...BASE_ARGS, ...extraArgs] }), name: label }; }
@@ -41,12 +46,22 @@ async function launch(chromium: Chromium, headless: boolean, extraArgs: string[]
   return { error: errors.join('\n  ') };
 }
 
-async function makeContext(browser: Browser): Promise<BrowserContext> {
-  const context = await browser.newContext({ userAgent: UA, locale: 'en-US', ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
-  // Look like an ordinary visitor's browser to simple bot checks.
-  await context.addInitScript(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
-  // Text is all we need: skip images, fonts and media to save time and bandwidth.
-  await context.route('**/*', route => ['image', 'font', 'media'].includes(route.request().resourceType()) ? route.abort() : route.continue());
+export interface ContextStyle {
+  /** Replace "HeadlessChrome" with the browser's real version (headless only). */
+  fixUserAgent?: boolean;
+  /** Skip images/fonts/media (faster, but request interception is detectable). */
+  blockMedia?: boolean;
+  /** Hide navigator.webdriver. */
+  hideWebdriver?: boolean;
+}
+
+export async function makeContext(browser: Browser, style: ContextStyle = { fixUserAgent: true, blockMedia: true, hideWebdriver: true }): Promise<BrowserContext> {
+  const context = await browser.newContext({
+    ...(style.fixUserAgent ? { userAgent: realUserAgent(browser.version()) } : {}),
+    locale: 'en-US', ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 }
+  });
+  if (style.hideWebdriver) await context.addInitScript(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
+  if (style.blockMedia) await context.route('**/*', route => ['image', 'font', 'media'].includes(route.request().resourceType()) ? route.abort() : route.continue());
   return context;
 }
 
@@ -59,7 +74,7 @@ function slots(limit: number) {
   };
 }
 
-async function readWith(context: BrowserContext, url: string, timeout: number, settle: number): Promise<BrowserReadResult> {
+export async function readWith(context: BrowserContext, url: string, timeout: number, settle: number): Promise<BrowserReadResult> {
   const page = await context.newPage().catch(() => null);
   try {
     if (!page) return { page: null, error: 'Could not open a tab' };
@@ -98,11 +113,10 @@ export async function createBrowserReader(opts: BrowserOptions = {}): Promise<{ 
   // Tier 2 starts on first need.
   let second: Promise<{ browser: Browser; context: BrowserContext } | null> | null = null;
   const startSecond = () => second ||= (async () => {
-    const http1 = ['--disable-http2'];
-    const visible = await launch(chromium, false, [...http1, '--window-position=-32000,-32000', '--window-size=1280,900', '--start-minimized']);
-    const got = 'error' in visible ? await launch(chromium, true, http1) : visible;
-    if ('error' in got) return null;
-    return { browser: got.browser, context: await makeContext(got.browser) };
+    const visible = await launch(chromium, false, ['--window-position=-32000,-32000', '--window-size=1280,900']);
+    if (!('error' in visible)) return { browser: visible.browser, context: await makeContext(visible.browser, { hideWebdriver: true }) };
+    const headless = await launch(chromium, true, []);
+    return 'error' in headless ? null : { browser: headless.browser, context: await makeContext(headless.browser, { fixUserAgent: true, hideWebdriver: true }) };
   })();
 
   const reader: BrowserReader = {
@@ -119,6 +133,7 @@ export async function createBrowserReader(opts: BrowserOptions = {}): Promise<{ 
       await tier2.take();
       try {
         const retry = await readWith(s.context, url, timeout, settle + 1500);
+        // (tier 2 loads images too, so it is slower; it only runs for sites that cut tier 1 off)
         // Keep whichever attempt shows more text; report both failures if neither loaded.
         const len = (r: BrowserReadResult) => r.page ? readPage(r.page.html, r.page.url).text.length : -1;
         if (retry.page && len(retry) >= len(result)) return { ...retry, tier: 2 };

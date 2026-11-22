@@ -56,7 +56,7 @@ export function sameSiteUrl(link: Link, page: Page): string {
 export interface FetchedPage { html: string; url: string }
 export type FetchHtml = (url: string) => Promise<FetchedPage | null>;
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36';
 
 /** Plain HTTP fetch with timeout and size cap. Returns the page, or why it failed. */
 export async function fetchDetailed(url: string): Promise<{ page: FetchedPage | null; error?: string }> {
