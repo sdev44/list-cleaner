@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import { createBrowserReader, type BrowserReader } from '../src/core/browser.js';
 import { readSite } from '../src/core/site.js';
 
-let server: Server, base = '', reader: BrowserReader | null = null;
+let server: Server, base = '', reader: BrowserReader | null = null, flakyDrops = 0;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -19,6 +19,11 @@ beforeAll(async () => {
       if (!/HeadlessChrome|Chrome/.test(ua) || !req.headers['sec-ch-ua']) { res.writeHead(403); res.end('Forbidden'); return; }
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end('<html><body><p>' + 'Safe rooms built to FEMA P-361 for homes and schools across Kansas. '.repeat(3) + '</p></body></html>');
+    } else if (req.url === '/flaky') {
+      // Drops the first visits (like bot protection cutting off headless Chrome), serves the next.
+      if (flakyDrops < 3) { flakyDrops++; req.socket.destroy(); return; } // Chrome retries a dropped request itself
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body><p>' + 'Atlas safe rooms: above-ground tornado shelters installed in your garage. '.repeat(3) + '</p></body></html>');
     } else { res.writeHead(404); res.end(); }
   });
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -45,6 +50,13 @@ describe('headless browser fallback', () => {
     expect(seen.ok).toBe(true);
     expect(seen.text).toContain('FEMA P-361');
   }, 60000);
+
+  it('retries a site that cut off the first visit', async (ctx) => {
+    if (!reader) return ctx.skip();
+    const seen = await reader.readDetailed(base + '/flaky');
+    expect(seen.tier).toBe(2);
+    expect(seen.page?.html).toContain('tornado shelters');
+  }, 90000);
 
   it('reports a site that is down even in the browser', async (ctx) => {
     if (!reader) return ctx.skip();

@@ -193,9 +193,10 @@ async function cmdDiagnose(input: string, v: Record<string, unknown>) {
       if (browser && (!second.page || plainText < 80)) {
         const seen = await browser.readDetailed(url);
         browserText = seen.page ? readPage(seen.page.html, seen.page.url).text.length : 0;
-        viaBrowser = !seen.page ? 'failed: ' + (seen.error || 'unknown') : browserText < 80 ? `only ${browserText} characters` + (seen.error ? ` (${seen.error})` : '') : 'OK' + (seen.error ? ` (${seen.error})` : '');
+        const how = seen.tier === 2 ? ' (second attempt, off-screen window)' : '';
+        viaBrowser = !seen.page ? 'failed: ' + (seen.error || 'unknown') : browserText < 80 ? `only ${browserText} characters` + (seen.error ? ` (${seen.error})` : '') : 'OK' + how;
       }
-      const bucket = second.page && plainText >= 80 ? 'Plain request works now' : viaBrowser.startsWith('OK') ? 'Fixed by browser' : 'Still unreadable';
+      const bucket = second.page && plainText >= 80 ? 'Plain request works now' : viaBrowser.startsWith('OK (second') ? 'Fixed by second attempt' : viaBrowser.startsWith('OK') ? 'Fixed by browser' : 'Still unreadable';
       const bReason = viaBrowser.startsWith('failed') ? viaBrowser.replace(/https?:\/\/\S+/g, '').slice(0, 60) : '';
       if (bReason) tally['  browser ' + bReason] = (tally['  browser ' + bReason] || 0) + 1;
       tally[bucket] = (tally[bucket] || 0) + 1;
