@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MockClassifier } from '../src/core/jev.js';
 import { runJob } from '../src/core/pipeline.js';
 import { ClassifierAuthError, type ClassifierRequest, type Row } from '../src/core/types.js';
-import { bestLink, decideWithJev, directoryTemplate, keywordScore, keywordStage, prefilter } from '../src/templates/directory/index.js';
+import { areaLink, bestLink, decideWithJev, directoryTemplate, isBorderline, keywordScore, keywordStage, mergeAnswers, prefilter, reachHint } from '../src/templates/directory/index.js';
 import { buildProfile, parseDirectoryRules, STORM_PRESET, termsFromRows } from '../src/templates/directory/rules.js';
 
 const S = STORM_PRESET;
@@ -67,6 +67,47 @@ describe('Jev decisions', () => {
   });
 });
 
+describe('partial service areas (from real Kansas cases)', () => {
+  const kw = { score: 50, strong: false, found: [] };
+  const superior = 'We primarily serve the great state of Oklahoma, but service areas up to 300 miles away from our yard. Feel free to send us an email.';
+  const valley = 'The install area is a 200-mile radius from our factory in Huntsville. For locations beyond the 200-mile radius, contact the Huntsville showroom about our drop-shipping program, assisted install';
+  const redZone = 'We Are In The RED ZONE. Tornado RISK Maps. Tornado Risk Map. Frequency Map. FEMA Region VII';
+  const mo = { name: 'X', address: '5121 S Campbell Ave, Springfield, MO 65810, United States' };
+  const ans = (serves: string, no = 0) => ({ supplies: { noul: 0.99 }, public_place: { noul: 0 }, serves_state: { choice: serves, probabilities: { no } } });
+
+  it('finds radius, delivery and drop-shipping wording', () => {
+    expect(reachHint(superior)).toMatch(/300 miles/);
+    expect(reachHint(valley)).toMatch(/200-mile radius/);
+    expect(reachHint(redZone)).toBe('');
+  });
+  it('sends "partly" to Review by default, with the evidence in the reason', () => {
+    const d = decideWithJev(mo, ans('partly'), 'KS', kw, S, superior);
+    expect(d.result).toBe('Review');
+    expect(d.reason).toMatch(/based outside Kansas but may reach it: ".*300 miles/);
+  });
+  it('never rejects on area when the site mentions a radius or shipping', () => {
+    expect(decideWithJev(mo, ans('no', 0.9), 'KS', kw, S, valley).result).toBe('Review');
+    expect(decideWithJev(mo, ans('no', 0.9), 'KS', kw, S, redZone).result).toBe('Rejected');
+  });
+  it('follows the partialArea setting', () => {
+    expect(decideWithJev(mo, ans('partly'), 'KS', kw, { ...S, partialArea: 'keep' }, superior).result).toBe('Clean');
+    expect(decideWithJev(mo, ans('partly'), 'KS', kw, { ...S, partialArea: 'remove' }, superior).result).toBe('Rejected');
+  });
+  it('asks twice when borderline and treats disagreement as unclear', () => {
+    expect(isBorderline({ supplies: { noul: 0.7 }, serves_state: { choice: 'yes' } }, S)).toBe(true);
+    expect(isBorderline({ supplies: { noul: 0.99 }, serves_state: { choice: 'no', probabilities: { no: 0.7 } } }, S)).toBe(true);
+    expect(isBorderline({ supplies: { noul: 0.99 }, serves_state: { choice: 'yes' } }, S)).toBe(false);
+    const m = mergeAnswers({ supplies: { noul: 0.9 }, serves_state: { choice: 'no', probabilities: { no: 0.7 } } }, { supplies: { noul: 0.7 }, serves_state: { choice: 'yes', probabilities: { no: 0.2 } } });
+    expect(m.supplies.noul).toBeCloseTo(0.8);
+    expect(m.serves_state.choice).toBe('unclear');
+    expect(decideWithJev(mo, m, 'KS', kw, S).result).toBe('Review');
+  });
+  it('picks a service-area page', () => {
+    const page = { text: '', base: 'https://x.com/', links: [{ href: '/about', text: 'About' }, { href: '/service-areas', text: 'Areas we serve' }] };
+    expect(areaLink(page)).toBe('https://x.com/service-areas');
+  });
+});
+
 describe('starter rules', () => {
   it('builds a dog grooming profile that keeps pet categories', () => {
     const rows = [{ name: 'Happy Paws Dog Grooming', category: 'Pet groomer' }, { name: 'Posh Pooch Grooming', category: 'Pet groomer' }];
@@ -109,6 +150,7 @@ describe('pipeline (mocked web + Jev)', () => {
     expect(results[2]?.reason).toBe('Free filter: Duplicate');
     expect(counts).toEqual({ keep: 1, review: 1, remove: 2, unchecked: 0 });
     expect(jev.requests).toHaveLength(1);
+    expect(results[0]?.fields?.clean_jev_asks).toBe(1);
     expect((jev.requests[0] as ClassifierRequest & { state: { target_state: string } }).state.target_state).toBe('Kansas');
   });
   it('without a key, sends evidence-backed businesses to Clean or Review by keywords', async () => {

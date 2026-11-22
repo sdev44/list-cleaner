@@ -78,8 +78,13 @@ export async function fetchDetailed(url: string): Promise<{ page: FetchedPage | 
 
 export const fetchHtml: FetchHtml = async (url) => (await fetchDetailed(url)).page;
 
-/** Chooses one inner page worth reading after the homepage ('' = none). Supplied by the template. */
-export type InnerPagePicker = (page: Page) => string;
+/** Chooses inner pages worth reading after the homepage ('' or [] = none; at most 2 are read). Supplied by the template. */
+export type InnerPagePicker = (page: Page) => string | string[];
+
+/** Homepage text for the classifier: the start plus the end, where footers keep addresses and service areas. */
+export function headAndTail(text: string, head = 3500, tail = 2000): string {
+  return text.length <= head + tail ? text : text.slice(0, head) + ' … ' + text.slice(-tail);
+}
 
 /** Opens a page in a real (headless) browser. See browser.ts. */
 export type BrowserRead = (url: string) => Promise<FetchedPage | null>;
@@ -104,12 +109,15 @@ export async function readSite(row: Row, pickInner: InnerPagePicker, fetcher: Fe
   }
   if (!home) return { ok: false, kind, status: browser ? 'Website unreachable (also tried in a browser tab)' : 'Website unreachable', text: '' };
   const page = readPage(home.html, home.url);
-  let text = page.text, status = viaBrowser ? 'Read homepage in a browser tab' : 'Read homepage';
-  const inner = pickInner(page);
-  if (inner) {
+  let status = viaBrowser ? 'Read homepage in a browser tab' : 'Read homepage';
+  const picked = pickInner(page);
+  const inners = [...new Set((Array.isArray(picked) ? picked : [picked]).filter(Boolean))].slice(0, 2);
+  const parts: string[] = [];
+  for (const inner of inners) {
     const more = (await fetcher(inner)) || (viaBrowser && browser ? await browser(inner) : null);
-    if (more) { text = readPage(more.html, more.url).text.slice(0, 4000) + ' || HOMEPAGE: ' + text; status += ' + ' + new URL(more.url).pathname; }
+    if (more) { parts.push(readPage(more.html, more.url).text.slice(0, inners.length > 1 ? 2500 : 4000)); status += ' + ' + new URL(more.url).pathname; }
   }
+  let text = parts.length ? parts.join(' || ') + ' || HOMEPAGE: ' + headAndTail(page.text) : page.text;
   if (text.length < 80) return { ok: false, kind, status: 'Website has almost no readable text', text };
   return { ok: true, kind, status, text: text.slice(0, 9000) };
 }

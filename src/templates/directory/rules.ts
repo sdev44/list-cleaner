@@ -30,11 +30,16 @@ export interface DirectoryRules {
    * Set false to reproduce the extension exactly.
    */
   protectPlausible: boolean;
+  /**
+   * Where a business based outside the target area goes when it reaches only part of it
+   * (an install radius, a region, delivery or drop-shipping). Default 'review'.
+   */
+  partialArea: 'keep' | 'review' | 'remove';
 }
 
 export const RULE_DEFAULTS: DirectoryRules = {
   niche: 'this kind of business', strongName: '(?!)', positive: [], plausibleCategories: [], coreCategories: [], excludeName: [],
-  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true
+  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review'
 };
 
 export const STORM_PRESET: DirectoryRules = {
@@ -132,7 +137,8 @@ export function parseDirectoryRules(input: unknown): DirectoryRules {
     excludeName: list(o.excludeName), hardExcludeCategory: list(o.hardExcludeCategory), excludeCategory: list(o.excludeCategory), services: list(o.services),
     jevHigh: num(o.jevHigh, 0.75, 0.5, 0.99), jevLow: num(o.jevLow, 0.25, 0.01, 0.5),
     publicReject: num(o.publicReject, 0.7, 0.5, 0.99), keywordClean: num(o.keywordClean, 55, 1, 100),
-    protectPlausible: o.protectPlausible !== false
+    protectPlausible: o.protectPlausible !== false,
+    partialArea: o.partialArea === 'keep' || o.partialArea === 'remove' ? o.partialArea : 'review'
   };
   try { new RegExp(rules.strongName, 'i'); } catch (e) { throw new Error('strongName is not a valid pattern: ' + (e as Error).message); }
   for (const p of rules.excludeName) { try { new RegExp(p, 'i'); } catch { throw new Error(`excludeName pattern is not valid: ${p}`); } }

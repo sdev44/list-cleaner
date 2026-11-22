@@ -90,6 +90,12 @@ describe('site reading', () => {
     expect(read.ok).toBe(true);
     expect(read.status).toBe('Read homepage + /services');
     expect(read.text.startsWith('| | Tornado shelter installation')).toBe(true);
+    // Two inner pages, and a long homepage keeps its footer.
+    const long = { 'http://big.example/': '<body>' + 'Intro text about our family firm. '.repeat(300) + '<a href="/a">A</a><a href="/b">B</a><footer>We serve all of Kansas and Missouri.</footer></body>', 'http://big.example/a': '<body>Page A</body>', 'http://big.example/b': '<body>Page B</body>' } as Record<string, string>;
+    const f2 = async (u: string) => long[u] ? { html: long[u], url: u } : null;
+    const two = await readSite({ website: 'big.example' }, p => [new URL('/a', p.base).href, new URL('/b', p.base).href], f2);
+    expect(two.status).toBe('Read homepage + /a + /b');
+    expect(two.text).toContain('We serve all of Kansas');
     expect((await readSite({ website: 'gone.example' }, () => '', fetcher)).status).toBe('Website unreachable');
     expect((await readSite({ website: '' }, () => '', fetcher)).status).toBe('No website');
     expect((await readSite({ website: 'facebook.com/x' }, () => '', fetcher)).status).toBe('Social/listing page only');

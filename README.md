@@ -88,6 +88,9 @@ Then hand-check ~50 businesses from the new **Clean** sheet to measure how often
 | `protectPlausible` (on by default): a category on the "could offer it" list is never removed by the free category filter | The extension removed "Metal fabricator", "Steel Fabricator" and "Plastic fabrication company" because `fabric` (fabric shops) is excluded. In Kansas that removed 35 businesses unchecked, including **DEFCON Underground Mfg.** Set `"protectPlausible": false` in rules to reproduce the extension exactly. |
 | Inner page picked from same-site links only | The extension took the first matching link anywhere. One off-site "storm" link (e.g. to a manufacturer) stopped it reading the business's own shelter page. |
 | Headless Chrome instead of a hidden tab | Same job: sites that refuse plain requests or need JavaScript. Up to 3 at a time; images and fonts skipped for speed. |
+| Service area: "partly" answer | Jev can say a business based elsewhere reaches only part of the area (install radius, region, delivery, drop-shipping). That goes to Review by default with the evidence quoted (`"partialArea": "review"`; or `"keep"` / `"remove"`). A business is never rejected on area when its site mentions a radius, delivery or shipping. |
+| Second opinion | Borderline answers (supplies near the Clean line, a weak "doesn't serve", or "partly") are asked twice. Probabilities are averaged and disagreement counts as unclear, so one wobbly answer can't reject a business. The **Jev Asks** column shows 1 or 2. |
+| Evidence for Jev | Reads up to two inner pages (the niche page and a service-area/locations page) and keeps the homepage footer, where addresses and service areas usually sit. |
 | Column mapping | Reads Outscraper, Apify and collector exports. Unknown columns are kept and passed through. |
 | One workbook out | Clean / Review / Rejected sheets plus a summary, instead of separate downloads. |
 
