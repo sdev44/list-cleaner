@@ -1,0 +1,39 @@
+{
+  "name": "list-cleaner",
+  "version": "0.1.0",
+  "description": "Template-driven cleaner for business lists (Google Maps exports). Free filters, website checks and Jev judgments.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sdev44/list-cleaner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sdev44/list-cleaner/issues"
+  },
+  "homepage": "https://github.com/sdev44/list-cleaner#readme",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "csv-parse": "^7.0.3",
+    "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  },
+  "private": true,
+  "type": "module",
+  "bin": {
+    "list-cleaner": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
