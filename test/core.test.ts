@@ -56,6 +56,10 @@ describe('distance to area', () => {
     expect(phoneArea({ phone: '(870) 588-7696' })).toBe('AR');
     expect(phoneArea({ phone: '(888) 262-7383' })).toBe('');
     expect(phoneArea({ phone: '+44 1472 000000' })).toBe('');
+    expect(phoneArea({ phone: '+44 28 9162 9137' })).toBe('NIR');
+    expect(phoneArea({ phone: '028 9065 2862' })).toBe('NIR');
+    expect(phoneArea({ phone: '+44 7761 505809' })).toBe('');
+    expect(phoneArea({ phone: '+353 42 933 0000' })).toBe('IRL');
   });
 });
 

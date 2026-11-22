@@ -64,9 +64,18 @@ export function milesFromArea(row: Row, area: string): number | null {
 
 let areaCodes: Record<string, string> | null = null;
 
-/** US state code from the phone's area code (e.g. 620 -> KS), or '' when unknown / toll-free / not US. */
+/**
+ * Area from the phone number: US area codes (620 -> KS), Northern Ireland landlines (028 -> NIR),
+ * Republic of Ireland (+353 -> IRL). '' when unknown, toll-free, mobile or elsewhere.
+ */
 export function phoneArea(row: Row): string {
-  const digits = String(row.phone || '').replace(/\D/g, '');
+  const raw = String(row.phone || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  if (/^\+?44/.test(raw.replace(/[\s()-]/g, '')) || /^0\d/.test(digits)) {
+    const national = digits.replace(/^44/, '0');
+    return /^028/.test(national) ? 'NIR' : '';
+  }
+  if (/^\+?353/.test(raw.replace(/[\s()-]/g, ''))) return 'IRL';
   const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
   if (ten.length !== 10) return '';
   if (!areaCodes) {
