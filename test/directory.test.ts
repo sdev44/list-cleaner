@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MockClassifier } from '../src/core/jev.js';
 import { runJob } from '../src/core/pipeline.js';
 import { ClassifierAuthError, type ClassifierRequest, type Row } from '../src/core/types.js';
-import { reviewPriority, areaLink, bestLink, decideWithJev, directoryTemplate, isBorderline, keywordScore, keywordStage, mergeAnswers, prefilter, reachHint } from '../src/templates/directory/index.js';
+import { reachOf, reviewPriority, areaLink, bestLink, decideWithJev, directoryTemplate, isBorderline, keywordScore, keywordStage, mergeAnswers, prefilter, reachHint } from '../src/templates/directory/index.js';
 import { buildProfile, parseDirectoryRules, STORM_PRESET, termsFromRows } from '../src/templates/directory/rules.js';
 
 const S = STORM_PRESET;
@@ -109,6 +109,17 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We ship nationwide.', 475).result).toBe('Clean');
     expect(decideWithJev(mo, ans('yes'), 'KS', kw, S, 'Quality shelters.', 75).result).toBe('Clean');
   });
+  it('handles v6 radius wording: travel charges, speed promises, "outside the metro"', () => {
+    expect(reachOf('$2.00 A MILE ROUND TRIP PER TRUCK FOR ANY JOB OVER 20 MILES bottom of page')?.miles).toBeUndefined();
+    const ok = { name: 'Storm Safe', address: '1 Main St, Oklahoma City, OK 73102, United States' };
+    const speed = 'Most installs within 100 miles of Oklahoma City are completed in one day.';
+    expect(reachOf(speed)?.miles).toBe(100);
+    const d = decideWithJev(ok, ans('partly'), 'KS', kw, S, speed, 114);
+    expect(d.result).toBe('Review');
+    expect(d.reason).toMatch(/100-mile reach and it is about 114 miles/);
+    expect(reachHint('For installations outside the Oklahoma City metro, a travel fee applies.')).toMatch(/outside the Oklahoma City metro/);
+  });
+
   it('ignores wording that is not about reach (from the v5 run)', () => {
     for (const t of [
       'We are an Oklahoma City Storm Shelters company at heart, however we serve the entire state of Oklahoma',

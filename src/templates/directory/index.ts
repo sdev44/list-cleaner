@@ -68,7 +68,7 @@ export function areaLink(page: Page): string {
 const REACH: { kind: 'radius' | 'wide' | 'near'; re: RegExp }[] = [
   { kind: 'radius', re: /\b(\d{2,4})[- ]?(?:miles?|mi)\b(?:[- ]radius)?(?=[^.!?|]{0,60}\b(?:from|of|around|radius|away|our)\b)|\b(?:within|up to|radius of)\s+(?:a\s+)?(\d{2,4})[- ]?(?:miles?|mi)\b/i },
   { kind: 'wide', re: /\b(nationwide|all 50 states|across the (?:us|u\.s\.|usa|united states|country)|anywhere in the (?:us|u\.s\.|country)|(?:we|will) (?:deliver|ship)\b[^.!?|]{0,40}\b(?:to|across|throughout|anywhere|nationwide)\b|(?:free |nationwide )?(?:delivery|shipping) (?:to|across|available|nationwide)|drop[- ]?ship\w*)/i },
-  { kind: 'near', re: /\b((?:serv(?:e|es|ing)|install(?:s|ing)?|work(?:s|ing)?) (?:in |across |throughout )?(?:the )?(?:surrounding|neighbou?ring|nearby|multiple|several|adjacent) (?:states|areas|counties)|surrounding states|neighbou?ring states (?:including|such as|like)|tri[- ]state area)/i }
+  { kind: 'near', re: /\b((?:serv(?:e|es|ing)|install(?:s|ing)?|work(?:s|ing)?) (?:in |across |throughout )?(?:the )?(?:surrounding|neighbou?ring|nearby|multiple|several|adjacent) (?:states|areas|counties)|surrounding states|neighbou?ring states (?:including|such as|like)|tri[- ]state area|(?:installations?|installs|deliver(?:y|ies)|jobs?|projects?) (?:located )?outside (?:the |our )?[\w .'-]{0,30}?(?:metro|area|city|county|region))/i }
 ];
 
 export interface Reach { kind: 'radius' | 'wide' | 'near'; quote: string; miles?: number }
@@ -90,6 +90,8 @@ export function reachOf(text: string): Reach | null {
   for (const { kind, re } of REACH) {
     const m = re.exec(t);
     if (!m) continue;
+    // "$2 a mile for any job over 20 miles" is a travel charge: they go further, not a limit.
+    if (kind === 'radius' && /(?:per|a|each)\s+mile|\bover\s+\d{1,4}\s*miles|beyond\s+\d{1,4}\s*miles|mileage|trip charge|travel (?:fee|charge)/i.test(t.slice(Math.max(0, m.index - 80), m.index + m[0].length + 40))) continue;
     const n = Number(m[1] || m[2]);
     return { kind, quote: quoteAround(t, m.index, m[0].length), ...(kind === 'radius' && n ? { miles: n } : {}) };
   }
@@ -213,8 +215,11 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
   /** Weighs the site's own reach claim against the real distance. */
   const judgeReach = (reach: Reach | null, jevSaysPartly: boolean) => {
     if (reach?.miles && distance !== null && distance > 0) {
-      return reach.miles >= distance ? partial(reach.quote)
-        : { result: 'Rejected', reason: `Site gives a ${reach.miles}-mile reach but it is about ${distance} miles from ${where}: "${reach.quote}"` } as const;
+      if (reach.miles >= distance) return partial(reach.quote);
+      // A stated radius is often about speed or pricing, not a hard limit: only clearly-too-far is rejected.
+      if (distance > reach.miles * 2)
+        return { result: 'Rejected', reason: `Site gives a ${reach.miles}-mile reach but it is about ${distance} miles from ${where}: "${reach.quote}"` } as const;
+      return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); site gives a ${reach.miles}-mile reach and it is about ${distance} miles from ${where}: "${reach.quote}"` } as const;
     }
     if (reach && (reach.kind === 'wide' || distance === null || distance <= 300)) return partial(reach.quote);
     if (jevSaysPartly) return partial('');
@@ -291,7 +296,7 @@ const TO_OUTCOME = { Clean: 'keep', Review: 'review', Rejected: 'remove' } as co
  */
 export function reviewPriority(reason: string, supplies: number | null, distance: number | null, strongName: boolean): number {
   const near = distance === null ? 0 : distance === 0 ? 8 : distance <= 50 ? 6 : distance <= 150 ? 3 : 0;
-  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
+  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves|mile reach and/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
   if (supplies !== null && /^Jev unsure/.test(reason)) return 50 + Math.round(supplies * 19) + Math.min(near, 5);
   if (/^Jev check failed|^Check failed|took longer/.test(reason)) return 45;
   return (strongName ? 40 : 20) + Math.min(near, 5);
