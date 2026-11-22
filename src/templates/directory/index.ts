@@ -2,6 +2,7 @@
 // Logic ported from the extension's cleaner (v2.5.5); behaviour kept identical except `protectPlausible`.
 import { inArea, regionName, rowArea, sameArea, searchedInArea } from '../../core/area.js';
 import { sameSiteUrl, siteHost } from '../../core/site.js';
+import { milesFromArea } from '../../core/geo.js';
 import type { CheckContext, Template } from '../../core/template.js';
 import type { Answer, Classifier, ClassifierRequest, Decision, Page, Row, SiteRead } from '../../core/types.js';
 import {
@@ -175,7 +176,7 @@ export function jevRequest(row: Row, site: SiteRead, area: string, S: DirectoryR
   };
 }
 
-export function decideWithJev(row: Row, answers: Record<string, Answer>, area: string, kw: KeywordResult, S: DirectoryRules, siteText = ''): { result: 'Clean' | 'Review' | 'Rejected'; reason: string } {
+export function decideWithJev(row: Row, answers: Record<string, Answer>, area: string, kw: KeywordResult, S: DirectoryRules, siteText = '', distance: number | null = null): { result: 'Clean' | 'Review' | 'Rejected'; reason: string } {
   const supplies = answers.supplies?.noul ?? 0.5;
   const pub = answers.public_place?.noul ?? 0;
   const serves = answers.serves_state?.choice || 'unclear';
@@ -197,7 +198,11 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
     if (serves === 'no' && servesNo >= 0.6) {
       // A stated radius, delivery or shipping can reach the area even when Jev says no: never reject on that.
       const hint = reachHint(siteText);
-      return hint ? partial(hint) : { result: 'Rejected', reason: `Based outside the area with no sign of serving ${where}` };
+      if (hint) return partial(hint);
+      // Close to the area: a person should decide, however confident Jev is.
+      if (distance !== null && distance > 0 && S.nearbyMiles > 0 && distance <= S.nearbyMiles)
+        return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); based about ${distance} miles from ${where}, no sign on its site of serving it` };
+      return { result: 'Rejected', reason: `Based outside the area with no sign of serving ${where}` };
     }
     return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}) but service area unclear` };
   }
@@ -239,11 +244,24 @@ export function decideWithoutJev(row: Row, kw: KeywordResult, area: string, S: D
 
 const TO_OUTCOME = { Clean: 'keep', Review: 'review', Rejected: 'remove' } as const;
 
+/**
+ * Review order (1–99, higher first): businesses that clearly offer the service and only need an area
+ * decision come first, nearest the area first; then unsure judgments; then unreadable websites.
+ */
+export function reviewPriority(reason: string, supplies: number | null, distance: number | null, strongName: boolean): number {
+  const near = distance === null ? 0 : distance === 0 ? 8 : distance <= 50 ? 6 : distance <= 150 ? 3 : 0;
+  if (supplies !== null && /may reach it|service area unclear|miles from/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
+  if (supplies !== null && /^Jev unsure/.test(reason)) return 50 + Math.round(supplies * 19) + Math.min(near, 5);
+  if (/^Jev check failed|^Check failed|took longer/.test(reason)) return 45;
+  return (strongName ? 40 : 20) + Math.min(near, 5);
+}
+
 async function check(row: Row, ctx: CheckContext<DirectoryRules>): Promise<Decision> {
   const S = ctx.rules;
   const site = await ctx.readSite(row, page => [bestLink(page, S), areaLink(page)]);
   const kw = keywordScore(row, site.text, S);
-  const fields: Record<string, string | number> = { clean_score: kw.score, clean_site_check: site.status };
+  const distance = milesFromArea(row, ctx.area);
+  const fields: Record<string, string | number> = { clean_score: kw.score, clean_site_check: site.status, clean_miles: distance ?? '' };
   let d = keywordStage(row, site, kw, S, ctx.area);
   if ('needsJev' in d) {
     if (ctx.classifier) {
@@ -254,7 +272,7 @@ async function check(row: Row, ctx: CheckContext<DirectoryRules>): Promise<Decis
           r.answers = mergeAnswers(r.answers, (await ctx.classifier.ask(request)).answers);
           fields.clean_jev_asks = 2;
         } else fields.clean_jev_asks = 1;
-        d = decideWithJev(row, r.answers, ctx.area, kw, S, site.text);
+        d = decideWithJev(row, r.answers, ctx.area, kw, S, site.text, distance);
         fields.clean_supplies = pct(r.answers.supplies?.noul ?? 0);
         fields.clean_role = (r.answers.role?.choice || '').replace(/_/g, ' ');
         fields.clean_serves = r.answers.serves_state?.choice || '';
@@ -265,7 +283,10 @@ async function check(row: Row, ctx: CheckContext<DirectoryRules>): Promise<Decis
     } else d = decideWithoutJev(row, kw, ctx.area, S);
   }
   if (d.result !== 'Rejected') fields.clean_services = servicesFor(row, site.text, S).join(', ');
-  return { outcome: TO_OUTCOME[d.result], reason: d.reason, fields };
+  const supplies = typeof fields.clean_supplies === 'string' ? Number(fields.clean_supplies.replace('%', '')) / 100 : null;
+  const priority = d.result === 'Review' ? reviewPriority(d.reason, supplies, distance, kw.strong) : undefined;
+  if (priority !== undefined) fields.clean_priority = priority;
+  return { outcome: TO_OUTCOME[d.result], reason: d.reason, fields, priority };
 }
 
 // ---------- rule suggestions ----------
@@ -318,6 +339,8 @@ export const directoryTemplate: Template<DirectoryRules> = {
   description: 'Keep only businesses that really offer your directory’s service in your target area.',
   outcomeLabels: { keep: 'Clean', review: 'Review', remove: 'Rejected' },
   columns: [
+    { key: 'clean_priority', header: 'Review Priority', width: 10, number: true },
+    { key: 'clean_miles', header: 'Miles From Area', width: 10, number: true },
     { key: 'clean_score', header: 'Keyword Score', width: 12, number: true },
     { key: 'clean_supplies', header: 'Jev: Supplies', width: 12 },
     { key: 'clean_role', header: 'Business Role', width: 16 },

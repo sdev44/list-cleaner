@@ -25,7 +25,10 @@ export function buildColumns(mapping: ColumnMapping, template: Template) {
 export function exportRows(rows: Row[], results: (RowResult | null)[], mapping: ColumnMapping, template: Template, only?: Outcome | 'all') {
   const columns = buildColumns(mapping, template);
   const out: (string | number)[][] = [];
-  rows.forEach((row, i) => {
+  // Highest priority first (stable); rows without one keep their order after them.
+  const order = rows.map((_, i) => i).sort((a, b) => (results[b]?.priority ?? -1) - (results[a]?.priority ?? -1) || a - b);
+  order.forEach(i => {
+    const row = rows[i];
     const r = results[i];
     if (only && only !== 'all' && r?.outcome !== only) return;
     out.push(columns.map(c => {

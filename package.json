@@ -21,7 +21,8 @@
     "cheerio": "^1.2.0",
     "csv-parse": "^7.0.3",
     "exceljs": "^4.4.0",
-    "playwright-core": "^1.65.1"
+    "playwright-core": "^1.65.1",
+    "zipcodes": "^8.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

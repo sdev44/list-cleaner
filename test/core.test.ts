@@ -6,6 +6,9 @@ import { areaCode, guessArea, inArea, rowArea, ukNation } from '../src/core/area
 import { tableToRows } from '../src/core/columns.js';
 import { readTable, writeWorkbook } from '../src/core/io.js';
 import { readPage, readSite, siteHost, websiteKind } from '../src/core/site.js';
+import { milesFromArea, rowZip } from '../src/core/geo.js';
+import { exportRows } from '../src/core/export.js';
+import { directoryTemplate } from '../src/templates/directory/index.js';
 
 describe('area', () => {
   it('reads area codes and names', () => {
@@ -29,6 +32,32 @@ describe('area', () => {
   it('counts no-address businesses found by area searches as in the area', () => {
     expect(inArea({ search_location: 'Kansas, USA; Abilene, Kansas, USA' }, 'KS')).toBe(true);
     expect(inArea({ search_location: 'Oklahoma, USA' }, 'KS')).toBe(false);
+  });
+});
+
+describe('distance to area', () => {
+  it('measures miles from a business ZIP to the nearest ZIP in the target state', () => {
+    expect(rowZip({ address: '3929 E 7th St, Joplin, MO 64801, United States' })).toBe('64801');
+    expect(milesFromArea({ address: '3929 E 7th St, Joplin, MO 64801, United States' }, 'KS')).toBeLessThan(20);
+    expect(milesFromArea({ address: '7262 Governors W Ste 106, Huntsville, AL 35806, United States' }, 'KS')).toBeGreaterThan(400);
+    expect(milesFromArea({ postal_code: '67202' }, 'KS')).toBe(0);
+    expect(milesFromArea({ address: 'no zip here' }, 'KS')).toBeNull();
+    expect(milesFromArea({ postal_code: '67202' }, 'UK')).toBeNull();
+  });
+});
+
+describe('export order', () => {
+  it('sorts each sheet by review priority, highest first', () => {
+    const rows = [{ name: 'Low' }, { name: 'High' }, { name: 'Clean one' }];
+    const results = [
+      { outcome: 'review' as const, reason: 'a', stage: 'checked' as const, priority: 20 },
+      { outcome: 'review' as const, reason: 'b', stage: 'checked' as const, priority: 90 },
+      { outcome: 'keep' as const, reason: 'c', stage: 'checked' as const }
+    ];
+    const mapping = { byKey: { name: 'Business Name' }, byHeader: { 'Business Name': 'name' }, extras: [] };
+    const out = exportRows(rows, results, mapping, directoryTemplate, 'review');
+    expect(out.rows.map(r => r[1])).toEqual(['High', 'Low']);
+    expect(out.rows.map(r => r[0])).toEqual([1, 2]);
   });
 });
 

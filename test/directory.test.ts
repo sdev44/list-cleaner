@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MockClassifier } from '../src/core/jev.js';
 import { runJob } from '../src/core/pipeline.js';
 import { ClassifierAuthError, type ClassifierRequest, type Row } from '../src/core/types.js';
-import { areaLink, bestLink, decideWithJev, directoryTemplate, isBorderline, keywordScore, keywordStage, mergeAnswers, prefilter, reachHint } from '../src/templates/directory/index.js';
+import { reviewPriority, areaLink, bestLink, decideWithJev, directoryTemplate, isBorderline, keywordScore, keywordStage, mergeAnswers, prefilter, reachHint } from '../src/templates/directory/index.js';
 import { buildProfile, parseDirectoryRules, STORM_PRESET, termsFromRows } from '../src/templates/directory/rules.js';
 
 const S = STORM_PRESET;
@@ -105,6 +105,24 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(m.supplies.noul).toBeCloseTo(0.8);
     expect(m.serves_state.choice).toBe('unclear');
     expect(decideWithJev(mo, m, 'KS', kw, S).result).toBe('Review');
+  });
+  it('sends a supplier near the area to Review even when Jev says it does not serve it', () => {
+    const joplin = { name: 'Atlas Safe Rooms Joplin Showroom', address: '3929 E 7th St, Joplin, MO 64801, United States' };
+    const d = decideWithJev(joplin, ans('no', 0.9), 'KS', kw, S, redZone, 9);
+    expect(d).toMatchObject({ result: 'Review' });
+    expect(d.reason).toMatch(/about 9 miles from Kansas/);
+    expect(decideWithJev(mo, ans('no', 0.9), 'KS', kw, S, redZone, 75).result).toBe('Rejected');
+    expect(decideWithJev(joplin, ans('no', 0.9), 'KS', kw, { ...S, nearbyMiles: 0 }, redZone, 9).result).toBe('Rejected');
+  });
+  it('ranks area decisions first, nearest first, then unsure, then unreadable sites', () => {
+    const p = (r: string, sup: number | null, miles: number | null, strong = false) => reviewPriority(r, sup, miles, strong);
+    const near = p('Offers x (99%); based about 9 miles from Kansas, no sign', 0.99, 9);
+    const far = p('Offers x (99%); based outside Kansas but may reach it: "up to 300 miles"', 0.99, 128);
+    const unsure = p('Jev unsure (70% likely to offer x)', 0.7, 0);
+    const unreadable = p('Website unreachable; business type (Contractor) could offer x', null, 0);
+    expect(near).toBeGreaterThan(far);
+    expect(far).toBeGreaterThan(unsure);
+    expect(unsure).toBeGreaterThan(unreadable);
   });
   it('picks a service-area page', () => {
     const page = { text: '', base: 'https://x.com/', links: [{ href: '/about', text: 'About' }, { href: '/service-areas', text: 'Areas we serve' }] };

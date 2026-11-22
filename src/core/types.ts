@@ -10,6 +10,8 @@ export interface Decision {
   reason: string;
   /** Extra output values, keyed by the template's column keys. */
   fields?: Record<string, string | number>;
+  /** Review order: higher = look at it first (1–99). Sheets are sorted by it. */
+  priority?: number;
 }
 
 export interface Link { href: string; text: string }

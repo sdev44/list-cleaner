@@ -35,11 +35,16 @@ export interface DirectoryRules {
    * (an install radius, a region, delivery or drop-shipping). Default 'review'.
    */
   partialArea: 'keep' | 'review' | 'remove';
+  /**
+   * A supplier based outside the area but within this many miles of it (US ZIP distance) goes to Review
+   * instead of Rejected, even with no sign of serving the area. 0 turns it off. Default 50.
+   */
+  nearbyMiles: number;
 }
 
 export const RULE_DEFAULTS: DirectoryRules = {
   niche: 'this kind of business', strongName: '(?!)', positive: [], plausibleCategories: [], coreCategories: [], excludeName: [],
-  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review'
+  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50
 };
 
 export const STORM_PRESET: DirectoryRules = {
@@ -138,7 +143,8 @@ export function parseDirectoryRules(input: unknown): DirectoryRules {
     jevHigh: num(o.jevHigh, 0.75, 0.5, 0.99), jevLow: num(o.jevLow, 0.25, 0.01, 0.5),
     publicReject: num(o.publicReject, 0.7, 0.5, 0.99), keywordClean: num(o.keywordClean, 55, 1, 100),
     protectPlausible: o.protectPlausible !== false,
-    partialArea: o.partialArea === 'keep' || o.partialArea === 'remove' ? o.partialArea : 'review'
+    partialArea: o.partialArea === 'keep' || o.partialArea === 'remove' ? o.partialArea : 'review',
+    nearbyMiles: num(o.nearbyMiles, 50, 0, 500)
   };
   try { new RegExp(rules.strongName, 'i'); } catch (e) { throw new Error('strongName is not a valid pattern: ' + (e as Error).message); }
   for (const p of rules.excludeName) { try { new RegExp(p, 'i'); } catch { throw new Error(`excludeName pattern is not valid: ${p}`); } }
