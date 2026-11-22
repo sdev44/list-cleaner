@@ -15,17 +15,31 @@ describe('Kansas parity (free filter)', async () => {
 
   it('reproduces every extension decision and reason in legacy mode', () => {
     expect(rows).toHaveLength(3293);
-    const got = prefilter(rows, { ...STORM_PRESET, protectPlausible: false });
+    const got = prefilter(rows, { ...STORM_PRESET, protectPlausible: false, strictDuplicates: false });
     const diffs = got.map((g, i) => g === expected[i] ? null : `${rows[i].name}: ${expected[i]} → ${g}`).filter(Boolean);
     expect(diffs).toEqual([]);
   });
 
   it('with protectPlausible, only passes extra businesses on (never removes new ones)', () => {
-    const got = prefilter(rows, STORM_PRESET);
+    const got = prefilter(rows, { ...STORM_PRESET, strictDuplicates: false });
     const newlyRemoved = got.filter((g, i) => g && !expected[i]);
     const rescued = rows.filter((_, i) => expected[i] && !got[i]).map(r => r.name);
     expect(newlyRemoved).toEqual([]);
     expect(rescued).toHaveLength(35);
     expect(rescued).toContain('DEFCON Underground Mfg.');
+  });
+});
+
+describe('Kansas duplicates by phone + website', async () => {
+  const { rows } = tableToRows(await readTable(fixture));
+  it('finds the RedGuard pair (SI Precast are branches with their own phones), and only adds duplicates', () => {
+    const base = prefilter(rows, { ...STORM_PRESET, strictDuplicates: false });
+    const strict = prefilter(rows, STORM_PRESET);
+    const added = rows.map((r, i) => !base[i] && strict[i] ? `${r.name} | ${r.website}` : '').filter(Boolean);
+    expect(strict.every((g, i) => !base[i] || !!g)).toBe(true); // everything removed before is still removed (reason may now say Duplicate)
+    expect(added.every(Boolean)).toBe(true);
+    expect(added.some(a => a.startsWith('SI Precast'))).toBe(false);
+    expect(added).toHaveLength(11);
+    expect(added.some(a => a.startsWith('RedGuard'))).toBe(true);
   });
 });

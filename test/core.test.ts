@@ -6,7 +6,7 @@ import { areaCode, guessArea, inArea, rowArea, ukNation } from '../src/core/area
 import { tableToRows } from '../src/core/columns.js';
 import { readTable, writeWorkbook } from '../src/core/io.js';
 import { readPage, readSite, siteHost, websiteKind } from '../src/core/site.js';
-import { milesFromArea, rowZip } from '../src/core/geo.js';
+import { milesFromArea, phoneArea, rowZip } from '../src/core/geo.js';
 import { exportRows } from '../src/core/export.js';
 import { directoryTemplate } from '../src/templates/directory/index.js';
 
@@ -43,6 +43,10 @@ describe('distance to area', () => {
     expect(milesFromArea({ postal_code: '67202' }, 'KS')).toBe(0);
     expect(milesFromArea({ address: 'no zip here' }, 'KS')).toBeNull();
     expect(milesFromArea({ postal_code: '67202' }, 'UK')).toBeNull();
+    expect(phoneArea({ phone: '+1 620-825-6022' })).toBe('KS');
+    expect(phoneArea({ phone: '(870) 588-7696' })).toBe('AR');
+    expect(phoneArea({ phone: '(888) 262-7383' })).toBe('');
+    expect(phoneArea({ phone: '+44 1472 000000' })).toBe('');
   });
 });
 

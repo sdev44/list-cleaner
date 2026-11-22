@@ -2,7 +2,7 @@
 // Logic ported from the extension's cleaner (v2.5.5); behaviour kept identical except `protectPlausible`.
 import { inArea, regionName, rowArea, sameArea, searchedInArea } from '../../core/area.js';
 import { sameSiteUrl, siteHost } from '../../core/site.js';
-import { milesFromArea } from '../../core/geo.js';
+import { milesFromArea, phoneArea } from '../../core/geo.js';
 import type { CheckContext, Template } from '../../core/template.js';
 import type { Answer, Classifier, ClassifierRequest, Decision, Page, Row, SiteRead } from '../../core/types.js';
 import {
@@ -22,7 +22,8 @@ export function prefilter(rows: Row[], S: DirectoryRules): string[] {
     const cat = String(row.category || '').toLowerCase() + ' ';
     const phone = String(row.phone || '').replace(/\D/g, '');
     const host = siteHost(row.website);
-    const ids = [row.place_id, row.place_key, phone && name.toLowerCase() + '|' + phone, host && 'site:' + host + '|' + simpleName(name)].filter(Boolean).map(String);
+    const ids = [row.place_id, row.place_key, phone && name.toLowerCase() + '|' + phone, host && 'site:' + host + '|' + simpleName(name),
+      S.strictDuplicates && phone.length >= 10 && host && 'phone+site:' + phone.slice(-10) + '|' + host].filter(Boolean).map(String);
     const protectedCat = S.protectPlausible && C.plausible.some(c => cat.includes(c));
     let reason = '';
     if (!name) reason = 'No business name';
@@ -103,7 +104,7 @@ export const reachHint = (text: string): string => reachOf(text)?.quote || '';
 
 /** Does the site name the area (or a nationwide reach) at all? */
 export const mentionsArea = (text: string, area: string): boolean =>
-  !!area && (new RegExp('\\b' + regionName(area).replace(/\s+/g, '\\s+') + '\\b', 'i').test(text) || /\b(nationwide|all 50 states)\b/i.test(text));
+  !!area && new RegExp('\\b' + regionName(area).replace(/\s+/g, '\\s+') + '\\b', 'i').test(text);
 
 // ---------- stage 2: keywords ----------
 
@@ -170,6 +171,16 @@ export function jevRequest(row: Row, site: SiteRead, area: string, S: DirectoryR
           false: 'It does not offer them: they are only mentioned in passing, in news, blog or advice, the listing is a public or non-commercial place, or the business does something else.'
         }
       },
+      kind: {
+        type: 'choice',
+        instructions: `What kind of listing is this, with regard to ${S.niche}?`,
+        criteria: {
+          supplier: `A business that sells, makes, installs, builds or services ${S.niche} for customers.`,
+          facility_with_them: `A place that only has ${S.niche} for its own residents, guests, staff or members (a housing development, apartments, hotel, venue, school, campground, business premises) rather than supplying them.`,
+          public_shelter: 'A public or community shelter, park shelter or emergency-management listing.',
+          other: 'Something else.'
+        }
+      },
       public_place: {
         type: 'noul',
         instructions: `Is this listing a public or community place (such as a park, public shelter or community centre), church, charity, school or government office, rather than a business that offers ${S.niche}?`
@@ -204,8 +215,12 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
   const pub = answers.public_place?.noul ?? 0;
   const serves = answers.serves_state?.choice || 'unclear';
   const servesNo = answers.serves_state?.probabilities?.no ?? 0;
-  const noAddressState = !rowArea(row) && searchedInArea(row, area);
-  const inState = sameArea(rowArea(row), area) || (noAddressState && serves !== 'no' && serves !== 'partly');
+  // No address: the phone's area code is the best location clue. Being found in an area search is not.
+  const phoneState = rowArea(row) ? '' : phoneArea(row);
+  const noAddressState = !rowArea(row) && (phoneState ? sameArea(phoneState, area) : searchedInArea(row, area));
+  const inState = sameArea(rowArea(row), area) || (noAddressState && (phoneState ? serves !== 'no' && serves !== 'partly' : serves === 'yes'));
+  const kind = answers.kind?.choice || '';
+  const kindP = answers.kind?.probabilities || {};
   const where = regionName(area);
   const partial = (why: string) => {
     const result = S.partialArea === 'keep' ? 'Clean' : S.partialArea === 'remove' ? 'Rejected' : 'Review';
@@ -226,18 +241,25 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
     return null;
   };
   if (pub >= S.publicReject && !kw.strong) return { result: 'Rejected', reason: `Public/community place, not a supplier (${pct(pub)})` };
+  const notSupplier = (kind === 'facility_with_them' || kind === 'public_shelter') && Math.max(kindP.facility_with_them ?? 0, kindP.public_shelter ?? 0, 0.6) >= 0.6;
+  if (notSupplier) {
+    const what = kind === 'public_shelter' ? 'a public or community shelter' : `a place that has ${S.niche} for its own use (housing, venue, premises)`;
+    // A matching name might still be a supplier: let a person check those.
+    return kw.strong ? { result: 'Review', reason: `Looks like ${what}, not a supplier` } : { result: 'Rejected', reason: `Looks like ${what}, not a supplier` };
+  }
   if (supplies <= S.jevLow) return { result: 'Rejected', reason: `Jev: does not offer ${S.niche} (${pct(supplies)})` };
   if (supplies >= S.jevHigh) {
     if (inState) return {
-      result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)})` + (sameArea(rowArea(row), area) ? '' : noAddressState && serves !== 'yes' ? '; no address, found in ' + where + ' searches' : '; serves ' + where)
+      result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)})` + (sameArea(rowArea(row), area) ? '' : noAddressState && serves !== 'yes' ? '; no address, ' + (phoneState ? `${where} phone number` : `found in ${where} searches`) : '; serves ' + where)
     };
     const reach = reachOf(siteText);
     if (serves === 'yes') {
       // Based elsewhere: Jev's "yes" needs backing from the site, or the business must be close.
-      const backed = mentionsArea(siteText, area) || (reach?.kind === 'wide') || (reach?.miles && distance !== null && reach.miles >= distance);
+      // Naming the area or a radius that reaches counts; nationwide shipping alone does not (not a local installer).
+      const backed = mentionsArea(siteText, area) || (reach?.miles && distance !== null && reach.miles >= distance);
       if (backed || (distance !== null && distance <= 150)) return { result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)}); serves ${where}` };
       const judged = judgeReach(reach, false);
-      if (judged?.result === 'Rejected') return judged;
+      if (judged) return judged;
       return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); Jev says it serves ${where}, but it is based${far} and its site doesn't say so` };
     }
     if (serves === 'partly') return judgeReach(reach, true)!;

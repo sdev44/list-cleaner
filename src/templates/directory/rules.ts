@@ -40,11 +40,13 @@ export interface DirectoryRules {
    * instead of Rejected, even with no sign of serving the area. 0 turns it off. Default 50.
    */
   nearbyMiles: number;
+  /** Also treat businesses with the same phone number and the same website as duplicates (default true). */
+  strictDuplicates: boolean;
 }
 
 export const RULE_DEFAULTS: DirectoryRules = {
   niche: 'this kind of business', strongName: '(?!)', positive: [], plausibleCategories: [], coreCategories: [], excludeName: [],
-  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50
+  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50, strictDuplicates: true
 };
 
 export const STORM_PRESET: DirectoryRules = {
@@ -144,7 +146,8 @@ export function parseDirectoryRules(input: unknown): DirectoryRules {
     publicReject: num(o.publicReject, 0.7, 0.5, 0.99), keywordClean: num(o.keywordClean, 55, 1, 100),
     protectPlausible: o.protectPlausible !== false,
     partialArea: o.partialArea === 'keep' || o.partialArea === 'remove' ? o.partialArea : 'review',
-    nearbyMiles: num(o.nearbyMiles, 50, 0, 500)
+    nearbyMiles: num(o.nearbyMiles, 50, 0, 500),
+    strictDuplicates: o.strictDuplicates !== false
   };
   try { new RegExp(rules.strongName, 'i'); } catch (e) { throw new Error('strongName is not a valid pattern: ' + (e as Error).message); }
   for (const p of rules.excludeName) { try { new RegExp(p, 'i'); } catch { throw new Error(`excludeName pattern is not valid: ${p}`); } }

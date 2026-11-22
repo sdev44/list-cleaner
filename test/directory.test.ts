@@ -106,9 +106,27 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(decideWithJev(al, ans('yes'), 'KS', kw, S, valley, 475).result).toBe('Rejected');
     expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'Quality shelters for your family.', 475)).toMatchObject({ result: 'Review' });
     expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We install in Kansas, Missouri and Oklahoma.', 475).result).toBe('Clean');
-    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We ship nationwide.', 475).result).toBe('Clean');
+    // Nationwide shipping alone is not a local installer (Storm Shelters of Iowa: "Limited, nationwide shipping").
+    expect(decideWithJev(al, ans('yes'), 'KS', kw, S, 'We ship nationwide.', 475).result).toBe('Review');
     expect(decideWithJev(mo, ans('yes'), 'KS', kw, S, 'Quality shelters.', 75).result).toBe('Clean');
   });
+  it('applies the verdicts from the Kansas directory check', () => {
+    const k = (kind: string, extra: Record<string, unknown> = {}) => ({ ...ans('yes'), kind: { choice: kind, probabilities: { [kind]: 0.9 } }, ...extra });
+    const lanterns = { name: 'The Lanterns of Andover', address: '1 Lantern Ln, Andover, KS 67002, United States' };
+    expect(decideWithJev(lanterns, k('facility_with_them'), 'KS', kw, S).result).toBe('Rejected');
+    const city = { name: 'City Storm Shelter', search_location: 'Kansas, USA' };
+    expect(decideWithJev(city, k('public_shelter'), 'KS', { ...kw, strong: true }, S).result).toBe('Review');
+    // No address: the phone's area code says where it is.
+    const safeZone = { name: 'Safe Zone Storm Shelters', phone: '+1 870-588-7696', search_location: 'Kansas, USA' };
+    expect(decideWithJev(safeZone, k('supplier', { serves_state: { choice: 'unclear' } }), 'KS', kw, S).result).toBe('Review');
+    const stretch = { name: "Stretch's Tornado Shelter", phone: '(620) 825-6022', search_location: 'Kansas, USA' };
+    const d = decideWithJev(stretch, k('supplier', { serves_state: { choice: 'unclear' } }), 'KS', kw, S);
+    expect(d.result).toBe('Clean');
+    expect(d.reason).toMatch(/Kansas phone number/);
+    // No address and no phone clue: being found in Kansas searches is not enough on its own.
+    expect(decideWithJev({ name: 'X', search_location: 'Kansas, USA' }, k('supplier', { serves_state: { choice: 'unclear' } }), 'KS', kw, S).result).toBe('Review');
+  });
+
   it('handles v6 radius wording: travel charges, speed promises, "outside the metro"', () => {
     expect(reachOf('$2.00 A MILE ROUND TRIP PER TRUCK FOR ANY JOB OVER 20 MILES bottom of page')?.miles).toBeUndefined();
     const ok = { name: 'Storm Safe', address: '1 Main St, Oklahoma City, OK 73102, United States' };

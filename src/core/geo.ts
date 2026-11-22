@@ -1,7 +1,7 @@
 // Distance from a business to the nearest part of a target area (US only for now), using ZIP code
 // centres from the offline `zipcodes` package. Used to rank Review, never to decide on its own.
 import { createRequire } from 'node:module';
-import { US_STATES } from './area.js';
+import { areaCode, US_STATES } from './area.js';
 import type { Row } from './types.js';
 
 interface Zip { zip: string; latitude: number; longitude: number; city: string; state: string; country: string }
@@ -60,4 +60,20 @@ export function milesFromArea(row: Row, area: string): number | null {
   }
   cache.set(key, result);
   return result;
+}
+
+let areaCodes: Record<string, string> | null = null;
+
+/** US state code from the phone's area code (e.g. 620 -> KS), or '' when unknown / toll-free / not US. */
+export function phoneArea(row: Row): string {
+  const digits = String(row.phone || '').replace(/\D/g, '');
+  const ten = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  if (ten.length !== 10) return '';
+  if (!areaCodes) {
+    const require = createRequire(import.meta.url);
+    areaCodes = (require('../data/area-codes.json') as { codes: Record<string, string> }).codes;
+  }
+  const state = areaCodes[ten.slice(0, 3)];
+  const code = state ? areaCode(state) : '';
+  return code && US_STATES[code] ? code : '';
 }
