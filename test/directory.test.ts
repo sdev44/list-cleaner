@@ -79,6 +79,10 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(reachHint(superior)).toMatch(/300 miles/);
     expect(reachHint(valley)).toMatch(/200-mile radius/);
     expect(reachHint(redZone)).toBe('');
+    // Quotes the matching sentence, not text before it.
+    const long = 'Our shelters have been engineered to sustain 250 mph winds and are reinforced with Grade-60 rebar. We deliver and install shelters across the OKC metro and surrounding states. Call today.';
+    expect(reachHint(long)).toBe('We deliver and install shelters across the OKC metro and surrounding states');
+    expect(reachHint('Steel rebar every 9 to 12 inches. Rated for 250 mph winds.')).toBe('');
   });
   it('sends "partly" to Review by default, with the evidence in the reason', () => {
     const d = decideWithJev(mo, ans('partly'), 'KS', kw, S, superior);

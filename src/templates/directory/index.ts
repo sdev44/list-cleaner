@@ -60,11 +60,25 @@ export function areaLink(page: Page): string {
   return local.find(l => AREA_LINK.test(l.href + ' ' + l.text))?.url || '';
 }
 
-/** First sentence saying the business reaches beyond its base: a mileage radius, delivery, shipping, nationwide. */
+const REACH = /\b(\d{2,4}[- ]?miles?\b|mile radius|radius|nationwide|all 50 states|across the (us|u\.s\.|country|midwest)|surrounding states|neighbou?ring states|we (deliver|ship|install|travel)\b[^.!?|]{0,40}\b(to|across|throughout|anywhere|states?)\b|(delivery|shipping) (to|across|available|nationwide)|drop[- ]?ship\w*|serv(e|ing|ice areas?)\b[^.!?|]{0,60}\b(states?|region|miles?|radius))/i;
+
+/**
+ * The sentence saying the business reaches beyond its base (a mileage radius, delivery, shipping,
+ * nationwide), centred on the words that matched so the reason quotes the evidence itself.
+ */
 export function reachHint(text: string): string {
-  const re = /[^.!?|]{0,140}\b(\d{2,4}[- ]?miles?|mile radius|radius|nationwide|all 50 states|across the (us|u\.s\.|country|midwest)|surrounding states|we (deliver|ship)|(free |nationwide )?(delivery|shipping) (to|across|available|nationwide)|drop[- ]?ship\w*)\b[^.!?|]{0,140}/i;
-  const m = String(text || '').match(re);
-  return m ? m[0].replace(/\s+/g, ' ').trim().slice(0, 220) : '';
+  const t = String(text || '').replace(/\s+/g, ' ');
+  const m = REACH.exec(t);
+  if (!m) return '';
+  // Expand to the surrounding sentence, at most ~110 characters each side of the match.
+  const stops = /[.!?|•»«]/;
+  let start = m.index, end = m.index + m[0].length;
+  for (let i = 0; i < 110 && start > 0 && !stops.test(t[start - 1]); i++) start--;
+  for (let i = 0; i < 110 && end < t.length && !stops.test(t[end]); i++) end++;
+  let out = t.slice(start, end).trim();
+  if (start > 0 && !stops.test(t[start - 1])) out = '…' + out.replace(/^\S*\s/, '');
+  if (end < t.length && !stops.test(t[end])) out = out.replace(/\s\S*$/, '') + '…';
+  return out;
 }
 
 // ---------- stage 2: keywords ----------
