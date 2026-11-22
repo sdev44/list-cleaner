@@ -40,6 +40,7 @@ describe('Kansas duplicates by phone + website', async () => {
     expect(rows.filter((_, i) => base[i] && !strict[i]).map(r => r.name)).toEqual(['Survive-A-Storm Shelters']);
     const redguard = rows.map((r, i) => r.name?.startsWith('RedGuard') ? strict[i] : null).filter(x => x !== null);
     expect(redguard.filter(Boolean)).toHaveLength(1);
-    expect(rows.filter((r, i) => r.name?.startsWith('SI Precast') && /^Duplicate of SI/.test(strict[i])).length).toBe(0);
+    // SI Precast branches have their own phones: no branch is newly removed.
+    expect(rows.filter((r, i) => r.name?.startsWith('SI Precast') && strict[i] && !base[i]).length).toBe(0);
   });
 });
