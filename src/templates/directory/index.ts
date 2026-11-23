@@ -2,7 +2,7 @@
 // Logic ported from the extension's cleaner (v2.5.5); behaviour kept identical except `protectPlausible`.
 import { inArea, nearNorthernIreland, regionName, rowArea, sameArea, searchedInArea, US_STATES } from '../../core/area.js';
 import { sameSiteUrl, siteHost } from '../../core/site.js';
-import { milesFromArea, phoneArea } from '../../core/geo.js';
+import { areaCountry, milesFromArea, phoneArea, phoneCountry } from '../../core/geo.js';
 import type { CheckContext, Template } from '../../core/template.js';
 import type { Answer, Classifier, ClassifierRequest, Decision, Page, Row, SiteRead } from '../../core/types.js';
 import {
@@ -202,9 +202,12 @@ export function keywordStage(row: Row, site: SiteRead, kw: KeywordResult, S: Dir
   if (core) {
     // Located: by address, else by phone. Turning up in an area search is not enough on its own.
     const known = rowArea(row) || phoneArea(row);
-    const located = !area || (known ? sameArea(known, area) : false);
+    // No address and a phone that only says the country (a UK mobile): found in the area's searches is
+    // enough, as long as the phone is from the same country (a Canadian number is not).
+    const sameCountry = !known && searchedInArea(row, area) && phoneCountry(row) === areaCountry(area);
+    const located = !area || (known ? sameArea(known, area) : sameCountry);
     return located
-      ? { result: 'Clean', reason: `Google category "${row.category}" fits ${S.niche}; ${site.status.toLowerCase()}` + (rowArea(row) ? '' : `; ${regionName(area)} phone number`) }
+      ? { result: 'Clean', reason: `Google category "${row.category}" fits ${S.niche}; ${site.status.toLowerCase()}` + (rowArea(row) ? '' : known ? `; ${regionName(area)} phone number` : `; no address, ${phoneCountry(row)} phone, found in ${regionName(area)} searches`) }
       : { result: 'Review', reason: `Google category "${row.category}" fits, but it may be outside ${regionName(area)}${known ? '' : ' (no address)'}; ${site.status.toLowerCase()}` };
   }
   if (kw.strong) return { needsJev: true };
@@ -315,7 +318,11 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
   }
   if (supplies <= S.jevLow) return { result: 'Rejected', reason: `Jev: does not offer ${S.niche} (${pct(supplies)})` };
   if (supplies >= S.jevHigh) {
-    const side = kind === 'side_service' && (kindP.side_service ?? 0.6) >= 0.6 && !kw.strong;
+    const cat = String(row.category || '').toLowerCase();
+    // Never a side service: a name that matches the directory, or a Google category that proves a match.
+    // Listed anyway: side services in categories the directory accepts (e.g. kennels that groom).
+    const side = kind === 'side_service' && (kindP.side_service ?? 0.6) >= 0.6 && !kw.strong && !coreCategory(row, S)
+      && !S.sideServiceCategories.some(c => c && cat.includes(c.toLowerCase()));
     if (side && S.sideServices === 'review' && (inState || serves === 'yes'))
       return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}) as an extra to another main trade` };
     if (inState) return {

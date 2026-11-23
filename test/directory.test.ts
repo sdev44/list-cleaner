@@ -148,6 +148,10 @@ describe('partial service areas (from real Kansas cases)', () => {
     // ...but an NI landline is enough.
     const local = { ...jay, phone: '+44 28 9162 9137' };
     expect(keywordStage(local, site(false), keywordScore(local, '', G), G, 'NIR')).toMatchObject({ result: 'Clean' });
+    // Ruffstrevor: no address, UK mobile, found in NI searches -> Clean (Jay's has a Canadian number).
+    const ruff = { name: 'Ruffstrevor Dog Grooming', category: 'Pet groomer', phone: '+44 7935 167379', search_location: 'Northern Ireland, UK' };
+    expect(keywordStage(ruff, site(false), keywordScore(ruff, '', G), G, 'NIR')).toMatchObject({ result: 'Clean' });
+    expect(keywordStage({ ...jay, phone: '+1 780-705-1225' }, site(false), keywordScore(jay, '', G), G, 'NIR')).toMatchObject({ result: 'Review' });
     // smartpets grooming school: "Pet groomer" category but Jev unsure -> Review.
     const school = { name: 'smartpets grooming school', category: 'Pet groomer', address: '8 Balloo Dr, Bangor BT19 7QY, United Kingdom' };
     expect(decideWithJev(school, { supplies: { noul: 0.59 }, serves_state: { choice: 'yes' } }, 'NIR', kw, G).result).toBe('Review');
@@ -156,6 +160,11 @@ describe('partial service areas (from real Kansas cases)', () => {
     const side = { supplies: { noul: 0.86 }, serves_state: { choice: 'yes' }, kind: { choice: 'side_service', probabilities: { side_service: 0.9 } } };
     expect(decideWithJev(vet, side, 'NIR', kw, G).reason).toMatch(/as an extra to another main trade/);
     expect(decideWithJev(vet, side, 'NIR', kw, { ...G, sideServices: 'keep' }).result).toBe('Clean');
+    // A kennel that grooms is listed when the directory accepts kennels; a "Pet groomer" is never a side service.
+    const kennel = { name: 'Riverview Kennels & Cattery', category: 'Kennel', address: '1 Main St, Lisburn BT28 1AA, United Kingdom' };
+    expect(decideWithJev(kennel, side, 'NIR', kw, G).result).toBe('Review');
+    expect(decideWithJev(kennel, side, 'NIR', kw, { ...G, sideServiceCategories: ['kennel'] }).result).toBe('Clean');
+    expect(decideWithJev({ ...kennel, name: 'ApexK9 Wellness', category: 'Pet groomer' }, side, 'NIR', kw, G).result).toBe('Clean');
     // A kennel named for grooming stays Clean.
     expect(decideWithJev({ ...vet, name: 'Dovecote Kennels & Grooming' }, side, 'NIR', { ...kw, strong: true }, G).result).toBe('Clean');
     // Handsome Hounds, Castleblayney (Co. Monaghan): just over the border -> Review, not Rejected.

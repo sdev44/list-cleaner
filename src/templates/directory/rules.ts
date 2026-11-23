@@ -48,11 +48,13 @@ export interface DirectoryRules {
    * Review unless their name matches the directory.
    */
   sideServices: 'keep' | 'review';
+  /** With sideServices 'review': Google categories whose side-service businesses are still listed (e.g. kennels that groom). */
+  sideServiceCategories: string[];
 }
 
 export const RULE_DEFAULTS: DirectoryRules = {
   niche: 'this kind of business', strongName: '(?!)', positive: [], plausibleCategories: [], coreCategories: [], excludeName: [],
-  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50, strictDuplicates: true, sideServices: 'keep'
+  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50, strictDuplicates: true, sideServices: 'keep', sideServiceCategories: []
 };
 
 export const STORM_PRESET: DirectoryRules = {
@@ -154,7 +156,8 @@ export function parseDirectoryRules(input: unknown): DirectoryRules {
     partialArea: o.partialArea === 'keep' || o.partialArea === 'remove' ? o.partialArea : 'review',
     nearbyMiles: num(o.nearbyMiles, 50, 0, 500),
     strictDuplicates: o.strictDuplicates !== false,
-    sideServices: o.sideServices === 'review' ? 'review' : 'keep'
+    sideServices: o.sideServices === 'review' ? 'review' : 'keep',
+    sideServiceCategories: list(o.sideServiceCategories)
   };
   try { new RegExp(rules.strongName, 'i'); } catch (e) { throw new Error('strongName is not a valid pattern: ' + (e as Error).message); }
   for (const p of rules.excludeName) { try { new RegExp(p, 'i'); } catch { throw new Error(`excludeName pattern is not valid: ${p}`); } }
