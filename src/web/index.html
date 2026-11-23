@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>List cleaner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1 class="brand">List cleaner</h1>
+    <nav class="top-actions">
+      <button type="button" class="quiet" id="openSettings">Jev key</button>
+      <button type="button" class="quiet" id="newList">Start a new list</button>
+    </nav>
+  </header>
+
+  <main id="app">
+    <p class="intro" id="intro">Upload a list of businesses from Google Maps. You'll describe what your directory lists, and every business is sorted into Clean, Review or Rejected.</p>
+
+    <!-- 1. Upload -->
+    <section class="step" id="stepUpload" aria-labelledby="h-upload">
+      <h2 id="h-upload"><span class="n">1</span> Your list</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".xlsx,.csv,.tsv,.json">
+        <strong>Choose a file</strong> or drop it here
+        <span class="hint">Excel, CSV or JSON from the Maps collector, Outscraper or Apify</span>
+      </label>
+      <div id="fileInfo" hidden>
+        <p class="file-line"><strong id="fileName"></strong> <span id="fileCount" class="muted"></span></p>
+        <details id="columns">
+          <summary>Check columns</summary>
+          <p class="hint">Each field was matched to a column in your file. Change any that are wrong.</p>
+          <div class="colmap" id="colmap"></div>
+        </details>
+      </div>
+    </section>
+
+    <!-- 2. Describe -->
+    <section class="step" id="stepSetup" aria-labelledby="h-setup" hidden>
+      <h2 id="h-setup"><span class="n">2</span> Your directory</h2>
+      <div class="row">
+        <label class="field grow">What does the directory list?
+          <input type="text" id="dirName" placeholder="e.g. Dog grooming, Storm shelters, Office fit-outs" autocomplete="off">
+        </label>
+        <label class="field">Area it covers
+          <select id="area"></select>
+        </label>
+      </div>
+      <p class="hint" id="areaHint"></p>
+      <button type="button" id="buildRules">Build rules</button>
+
+      <div id="questionsBlock" hidden>
+        <div class="suggest">
+          <p id="suggestText">Jev can look at the Google categories in your list and suggest what to keep and remove. It takes a minute and costs well under 1p.</p>
+          <button type="button" class="secondary" id="suggest">Get suggestions</button>
+          <p class="hint" id="suggestProgress" hidden></p>
+          <pre class="summary" id="suggestSummary" hidden></pre>
+        </div>
+        <form id="questions" class="questions"></form>
+        <details class="advanced">
+          <summary>Advanced rules</summary>
+          <p class="hint">The rules behind your answers, for fine control. Saving here replaces your answers until you choose Use my answers again.</p>
+          <textarea id="rulesJson" spellcheck="false" rows="18"></textarea>
+          <div class="row">
+            <button type="button" class="secondary" id="saveRules">Save advanced rules</button>
+            <button type="button" class="quiet" id="resetRules">Use my answers again</button>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- 3. Clean -->
+    <section class="step" id="stepRun" aria-labelledby="h-run" hidden>
+      <h2 id="h-run"><span class="n">3</span> Clean</h2>
+      <p class="hint" id="runHint"></p>
+      <div class="row">
+        <button type="button" id="run">Start cleaning</button>
+        <button type="button" class="secondary" id="stop" hidden>Stop</button>
+      </div>
+      <div class="progress" id="progress" hidden>
+        <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+        <p class="hint" id="progressText"></p>
+      </div>
+    </section>
+
+    <!-- 4. Results -->
+    <section class="step results" id="stepResults" aria-labelledby="h-results" hidden>
+      <h2 id="h-results"><span class="n">4</span> Results</h2>
+      <div class="piles" id="piles" role="img" aria-label="Results"></div>
+      <div class="pile-legend" id="pileLegend"></div>
+
+      <div class="toolbar">
+        <div class="tabs" role="tablist" id="tabs"></div>
+        <input type="search" id="search" placeholder="Search names, categories, reasons" aria-label="Search">
+      </div>
+      <div class="bulk">
+        <label>Set all <span id="bulkCount">0</span> shown to
+          <select id="bulkTo">
+            <option value="">…</option>
+            <option value="keep">Clean</option>
+            <option value="review">Review</option>
+            <option value="remove">Rejected</option>
+            <option value="clear">My decision cleared</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table class="rows">
+          <thead><tr><th>Business</th><th>Where</th><th>Result</th><th>Why</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="pager"><button type="button" class="quiet" id="prev">Previous</button><span id="pageText"></span><button type="button" class="quiet" id="next">Next</button></div>
+      <div class="row downloads">
+        <a class="button" id="dlXlsx" href="/api/job/download?format=xlsx">Download Excel</a>
+        <a class="button secondary" id="dlCsv" href="/api/job/download?format=csv">Download CSV</a>
+      </div>
+    </section>
+
+    <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings-form">
+      <h2>Jev key</h2>
+      <p class="hint">Your TypeSafe (Jev) API key. It's saved on this computer only and never shown again.</p>
+      <label class="field">API key <input type="password" id="jevKey" autocomplete="off" placeholder="Paste your key"></label>
+      <p class="hint" id="keyStatus"></p>
+      <div class="row">
+        <button type="button" id="saveKey">Save and test</button>
+        <button type="submit" class="quiet">Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

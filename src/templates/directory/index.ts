@@ -206,6 +206,12 @@ export function keywordStage(row: Row, site: SiteRead, kw: KeywordResult, S: Dir
     // enough, as long as the phone is from the same country (a Canadian number is not).
     const sameCountry = !known && searchedInArea(row, area) && phoneCountry(row) === areaCountry(area);
     const located = !area || (known ? sameArea(known, area) : sameCountry);
+    // Definitely elsewhere (address says so) and not near the border: the category alone doesn't keep it.
+    if (!located && rowArea(row) && !sameArea(rowArea(row), area)) {
+      const miles = milesFromArea(row, area);
+      const near = (miles !== null && S.nearbyMiles > 0 && miles <= S.nearbyMiles) || (area === 'NIR' && rowArea(row) === 'IRL' && nearNorthernIreland(row.address));
+      if (!near) return { result: 'Rejected', reason: `Based in ${regionName(rowArea(row))}, outside ${regionName(area)}; ${site.status.toLowerCase()}` };
+    }
     return located
       ? { result: 'Clean', reason: `Google category "${row.category}" fits ${S.niche}; ${site.status.toLowerCase()}` + (rowArea(row) ? '' : known ? `; ${regionName(area)} phone number` : `; no address, ${phoneCountry(row)} phone, found in ${regionName(area)} searches`) }
       : { result: 'Review', reason: `Google category "${row.category}" fits, but it may be outside ${regionName(area)}${known ? '' : ' (no address)'}; ${site.status.toLowerCase()}` };
@@ -483,7 +489,7 @@ async function suggestRules(rows: Row[], S: DirectoryRules, classifier: Classifi
   const summary = list('Proves a match', added.core) + list('Worth reviewing', added.review) + list('Remove for free', added.remove)
     + list('Remove even with a matching name', added.hard) + list('Names to remove', conflicts.map(n => n.replace(/\\b/g, '')))
     || `No changes: ${stats.length} categories checked and none were clear-cut.`;
-  return { rules: next, summary: summary.trim() };
+  return { rules: next, summary: summary.trim(), added: { ...added, names: conflicts } };
 }
 
 export const directoryTemplate: Template<DirectoryRules> = {

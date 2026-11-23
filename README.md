@@ -25,7 +25,22 @@ Put your Jev key in a `.env` file in the folder you run from (never commit it):
 JEV_API_KEY=your-key-here
 ```
 
-## Use
+## The web app
+
+```bash
+npm run app
+```
+
+Opens **http://localhost:4310** in your browser (keep the window open while you use it). It runs on your PC only.
+
+1. **Your list:** upload an Excel, CSV or JSON file. Columns are matched automatically; open *Check columns* to fix any.
+2. **Your directory:** say what it lists and the area (guessed from the addresses). *Build rules*, then *Get suggestions* (Jev looks at the list's Google categories), then answer the questions: which side-service businesses to list, look-alike trades to remove, name words to remove, out-of-area suppliers, duplicates. *Advanced rules* shows the raw rules.
+3. **Clean:** reads websites and asks Jev. Stop any time; *Check the rest* carries on.
+4. **Results:** Clean / Review / Rejected with reasons. Change any result (your decision is kept and marked), or set every business matching a tab and search at once. Changing an answer above re-sorts in seconds, with no website reads or Jev calls. Download Excel or CSV.
+
+**Jev key** (top of the page) is saved in `data/settings.json` on your PC and never shown again. Everything else lives in `data/` too. *Start a new list* clears the page for the next file.
+
+## Command line
 
 ```bash
 # See how your columns were matched

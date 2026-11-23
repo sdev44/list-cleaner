@@ -14,7 +14,12 @@ export interface CheckContext<R> {
   classifier?: Classifier;
 }
 
-export interface RuleSuggestion<R> { rules: R; summary: string }
+export interface RuleSuggestion<R> {
+  rules: R;
+  summary: string;
+  /** What changed, for setup questions: category keys per bucket, and suggested name words. */
+  added?: { core: string[]; review: string[]; remove: string[]; hard: string[]; names: string[] };
+}
 
 export interface Template<R = unknown> {
   id: string;

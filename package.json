@@ -4,10 +4,11 @@
   "description": "Template-driven cleaner for business lists (Google Maps exports). Free filters, website checks and Jev judgments.",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"require('fs').cpSync('src/data','dist/data',{recursive:true})\"",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('fs');fs.cpSync('src/data','dist/data',{recursive:true});fs.cpSync('src/web','dist/web',{recursive:true})\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "cli": "tsx src/cli.ts"
+    "cli": "tsx src/cli.ts",
+    "app": "tsx src/cli.ts serve"
   },
   "repository": {
     "type": "git",

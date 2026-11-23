@@ -7,7 +7,7 @@
 //   compare <old> <new>     compare two result files (e.g. the extension's output vs this tool's)
 import { existsSync, readFileSync } from 'node:fs';
 import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { areaCode, guessArea, regionName } from './core/area.js';
 import { createBrowserReader, type BrowserReader } from './core/browser.js';
@@ -26,6 +26,7 @@ const HELP = `list-cleaner <command> [options]
 
 Commands
   clean <file>           Clean a list and write a results workbook
+  serve                  Open the web app in your browser (http://localhost:4310)
   rules <file>           Write starter rules (JSON) for this list
   suggest-rules <file>   Improve rules by asking Jev about the list's categories (needs JEV_API_KEY)
   inspect <file>         Show how columns were matched
@@ -47,6 +48,7 @@ Options
   --no-jev               Don't call Jev even if a key is set (uncertain businesses go to Review)
   --no-browser           Don't open hard-to-read sites in headless Chrome (faster, reads fewer sites)
   --fresh                Ignore saved progress and start again
+  --port <n>             (serve) port to use, default 4310
   --from <file.xlsx>     (redecide) the earlier output whose evidence to reuse
   --live                 (redecide) check businesses the evidence doesn't cover, and ask Jev when the rules need a new answer
   --reask                (redecide, with --live) reuse saved website text but ask Jev every question again
@@ -320,6 +322,18 @@ async function cmdRedecide(input: string, v: Record<string, unknown>) {
   log(`Saved ${out}`);
 }
 
+async function cmdServe(v: Record<string, unknown>) {
+  const { createApp } = await import('./server/app.js');
+  const port = Number(v.port || 4310);
+  const { server } = createApp({ dataDir: join(process.cwd(), 'data'), browser: !v['no-browser'] });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', () => resolve()); });
+  const url = `http://localhost:${port}`;
+  log(`List cleaner is running at ${url}  (keep this window open; Ctrl+C to stop)`);
+  const { spawn } = await import('node:child_process');
+  const open = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try { spawn(open[0] as string, open[1] as string[], { stdio: 'ignore', detached: true }).on('error', () => {}).unref(); } catch { /* open it by hand */ }
+}
+
 async function cmdRules(input: string, v: Record<string, unknown>) {
   const template = getTemplate(String(v.template || 'directory'));
   const { rows } = await loadList(input, v.map as string | undefined);
@@ -411,12 +425,13 @@ async function main() {
     allowPositionals: true,
     options: {
       template: { type: 'string' }, area: { type: 'string' }, name: { type: 'string' }, rules: { type: 'string' }, out: { type: 'string' },
-      map: { type: 'string' }, from: { type: 'string' }, live: { type: 'boolean' }, reask: { type: 'boolean' }, limit: { type: 'string' }, concurrency: { type: 'string' }, 'no-jev': { type: 'boolean' }, 'no-browser': { type: 'boolean' }, fresh: { type: 'boolean' },
+      map: { type: 'string' }, port: { type: 'string' }, from: { type: 'string' }, live: { type: 'boolean' }, reask: { type: 'boolean' }, limit: { type: 'string' }, concurrency: { type: 'string' }, 'no-jev': { type: 'boolean' }, 'no-browser': { type: 'boolean' }, fresh: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }
     }
   });
   const [cmd, ...args] = positionals;
   if (values.help || !cmd) { console.log(HELP); return; }
+  if (cmd === 'serve') return cmdServe(values);
   const need = (n: number) => { if (args.length < n) throw new Error(`"${cmd}" needs ${n === 1 ? 'a file' : n + ' files'}. See --help.`); };
   switch (cmd) {
     case 'clean': need(1); return cmdClean(args[0], values);
