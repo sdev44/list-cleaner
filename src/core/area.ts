@@ -89,3 +89,11 @@ export function searchedInArea(row: Row, target: string): boolean {
 /** In the area by address, or (with no address) found by searches for the area. */
 export const inArea = (row: Row, target: string): boolean =>
   sameArea(rowArea(row), target) || (!rowArea(row) && searchedInArea(row, target));
+
+/** Republic of Ireland counties on the Northern Ireland border (Donegal, Leitrim, Cavan, Monaghan, Louth). */
+export function nearNorthernIreland(address: unknown): boolean {
+  const a = String(address || '');
+  return /\b(Co\.?|County)\s+(Donegal|Leitrim|Cavan|Monaghan|Louth)\b/i.test(a)
+    || /\b(Donegal|Letterkenny|Buncrana|Lifford|Bundoran|Ballyshannon|Moville|Carndonagh|Manorhamilton|Cavan|Cootehill|Belturbet|Bailieborough|Monaghan|Clones|Carrickmacross|Castleblayney|Dundalk|Drogheda|Ardee|Carlingford)\b/i.test(a)
+    || /\b(F93|F92|F94|H12|H14|H16|H18|H23|A75|A81|A91|A92)\s?[0-9A-Z]{4}\b/i.test(a);
+}

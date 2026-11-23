@@ -42,11 +42,17 @@ export interface DirectoryRules {
   nearbyMiles: number;
   /** Also treat businesses with the same phone number and the same website as duplicates (default true). */
   strictDuplicates: boolean;
+  /**
+   * Businesses whose main trade is something else and offer the service as an extra (a vet that also
+   * grooms, a builder that also installs shelters). 'keep' lists them (default); 'review' sends them to
+   * Review unless their name matches the directory.
+   */
+  sideServices: 'keep' | 'review';
 }
 
 export const RULE_DEFAULTS: DirectoryRules = {
   niche: 'this kind of business', strongName: '(?!)', positive: [], plausibleCategories: [], coreCategories: [], excludeName: [],
-  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50, strictDuplicates: true
+  hardExcludeCategory: [], excludeCategory: [], services: [], jevHigh: 0.75, jevLow: 0.25, publicReject: 0.7, keywordClean: 55, protectPlausible: true, partialArea: 'review', nearbyMiles: 50, strictDuplicates: true, sideServices: 'keep'
 };
 
 export const STORM_PRESET: DirectoryRules = {
@@ -147,7 +153,8 @@ export function parseDirectoryRules(input: unknown): DirectoryRules {
     protectPlausible: o.protectPlausible !== false,
     partialArea: o.partialArea === 'keep' || o.partialArea === 'remove' ? o.partialArea : 'review',
     nearbyMiles: num(o.nearbyMiles, 50, 0, 500),
-    strictDuplicates: o.strictDuplicates !== false
+    strictDuplicates: o.strictDuplicates !== false,
+    sideServices: o.sideServices === 'review' ? 'review' : 'keep'
   };
   try { new RegExp(rules.strongName, 'i'); } catch (e) { throw new Error('strongName is not a valid pattern: ' + (e as Error).message); }
   for (const p of rules.excludeName) { try { new RegExp(p, 'i'); } catch { throw new Error(`excludeName pattern is not valid: ${p}`); } }

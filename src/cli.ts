@@ -49,6 +49,7 @@ Options
   --fresh                Ignore saved progress and start again
   --from <file.xlsx>     (redecide) the earlier output whose evidence to reuse
   --live                 (redecide) check businesses the evidence doesn't cover, and ask Jev when the rules need a new answer
+  --reask                (redecide, with --live) reuse saved website text but ask Jev every question again
   -h, --help
 
 Jev key: set JEV_API_KEY in the environment or in a .env file in the current folder.`;
@@ -283,7 +284,12 @@ async function cmdRedecide(input: string, v: Record<string, unknown>) {
   const { rows, mapping } = await loadList(input, v.map as string | undefined);
   const rules = await loadRules(template, rows, v);
   const area = resolveArea(v, rows);
-  const replay = await loadEvidence(String(v.from) + '.evidence.jsonl', rows);
+  let replay = await loadEvidence(String(v.from) + '.evidence.jsonl', rows);
+  // --reask: keep the saved website text, but ask Jev again (e.g. after its questions changed).
+  if (v.reask) {
+    if (!v.live) throw new Error('--reask asks Jev again, so it needs --live too.');
+    replay = replay.map(e => e ? { site: e.site, asks: [] } : e);
+  }
   const out = String(v.out || stem(String(v.from)) + '-redecided.xlsx');
   await mkdir(dirname(out), { recursive: true });
   const key = process.env.JEV_API_KEY || '';
@@ -405,7 +411,7 @@ async function main() {
     allowPositionals: true,
     options: {
       template: { type: 'string' }, area: { type: 'string' }, name: { type: 'string' }, rules: { type: 'string' }, out: { type: 'string' },
-      map: { type: 'string' }, from: { type: 'string' }, live: { type: 'boolean' }, limit: { type: 'string' }, concurrency: { type: 'string' }, 'no-jev': { type: 'boolean' }, 'no-browser': { type: 'boolean' }, fresh: { type: 'boolean' },
+      map: { type: 'string' }, from: { type: 'string' }, live: { type: 'boolean' }, reask: { type: 'boolean' }, limit: { type: 'string' }, concurrency: { type: 'string' }, 'no-jev': { type: 'boolean' }, 'no-browser': { type: 'boolean' }, fresh: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' }
     }
   });

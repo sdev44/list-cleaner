@@ -82,14 +82,19 @@ export async function runJob<R>(opts: RunOptions<R>): Promise<RunSummary> {
     const live = opts.classifier;
     const recording: Classifier = {
       async ask(request: ClassifierRequest) {
-        const questions = Object.keys(request.questions).sort();
+        // Question names plus a fingerprint of their wording: reworded questions need fresh answers.
+        const wording = JSON.stringify(request.questions);
+        let h = 0; for (let k = 0; k < wording.length; k++) h = (h * 31 + wording.charCodeAt(k)) | 0;
+        const questions = [...Object.keys(request.questions).sort(), '#' + (h >>> 0).toString(36)];
         if (saved) {
           const prior = saved.asks[askIndex++];
-          if (prior && prior.questions.join() === questions.join()) { ev.asks.push(prior); return prior.response; }
+          // Evidence saved before wording fingerprints existed is matched on question names only.
+          const sameAs = (q: string[]) => q.some(x => x.startsWith('#')) ? q.join() === questions.join() : q.join() === questions.filter(x => !x.startsWith('#')).join();
+          if (prior && sameAs(prior.questions)) { ev.asks.push(prior); return prior.response; }
           if (!live) {
             // Asked again with the same questions (e.g. a second opinion the first run didn't need):
             // reuse the saved answer rather than leaving the business undecided.
-            const same = [...saved.asks].reverse().find(a => a.questions.join() === questions.join());
+            const same = [...saved.asks].reverse().find(a => sameAs(a.questions));
             if (same && prior === undefined) return same.response;
             throw new NeedsFreshAnswer('needs a new Jev answer');
           }

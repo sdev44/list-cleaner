@@ -139,6 +139,32 @@ describe('partial service areas (from real Kansas cases)', () => {
     expect(reachOf('Stock Number Weight 60 mi from base')).toBeNull();
   });
 
+  it('applies the Northern Ireland spot-check verdicts', () => {
+    const G = { ...S, niche: 'dog grooming', strongName: '\\b(groom)', coreCategories: ['pet groomer'], sideServices: 'review' as const };
+    const site = (ok: boolean) => ({ ok, kind: 'none' as const, status: 'No website', text: '' });
+    // Jay's Dog Grooming: no address, no website, only found in NI searches -> Review, not Clean.
+    const jay = { name: "Jay's Dog Grooming", category: 'Pet groomer', search_location: 'Northern Ireland, UK' };
+    expect(keywordStage(jay, site(false), keywordScore(jay, '', G), G, 'NIR')).toMatchObject({ result: 'Review' });
+    // ...but an NI landline is enough.
+    const local = { ...jay, phone: '+44 28 9162 9137' };
+    expect(keywordStage(local, site(false), keywordScore(local, '', G), G, 'NIR')).toMatchObject({ result: 'Clean' });
+    // smartpets grooming school: "Pet groomer" category but Jev unsure -> Review.
+    const school = { name: 'smartpets grooming school', category: 'Pet groomer', address: '8 Balloo Dr, Bangor BT19 7QY, United Kingdom' };
+    expect(decideWithJev(school, { supplies: { noul: 0.59 }, serves_state: { choice: 'yes' } }, 'NIR', kw, G).result).toBe('Review');
+    // Bessbrook vet: grooming is a side service -> Review when the directory says so.
+    const vet = { name: 'Bessbrook Veterinary Clinic', category: 'Veterinarian', address: '5 Wakefield Terrace, Bessbrook, Newry BT35 7AA, United Kingdom' };
+    const side = { supplies: { noul: 0.86 }, serves_state: { choice: 'yes' }, kind: { choice: 'side_service', probabilities: { side_service: 0.9 } } };
+    expect(decideWithJev(vet, side, 'NIR', kw, G).reason).toMatch(/as an extra to another main trade/);
+    expect(decideWithJev(vet, side, 'NIR', kw, { ...G, sideServices: 'keep' }).result).toBe('Clean');
+    // A kennel named for grooming stays Clean.
+    expect(decideWithJev({ ...vet, name: 'Dovecote Kennels & Grooming' }, side, 'NIR', { ...kw, strong: true }, G).result).toBe('Clean');
+    // Handsome Hounds, Castleblayney (Co. Monaghan): just over the border -> Review, not Rejected.
+    const hh = { name: 'Handsome Hounds', category: 'Pet groomer', address: '18 Muckno St, Castleblayney, Co. Monaghan, A75 X000, Ireland' };
+    const no = { supplies: { noul: 0.97 }, serves_state: { choice: 'no', probabilities: { no: 0.9 } } };
+    expect(decideWithJev(hh, no, 'NIR', kw, G).reason).toMatch(/just over the border/);
+    expect(decideWithJev({ ...hh, address: '1 Main St, Dublin 2, D02 X285, Ireland' }, no, 'NIR', kw, G).result).toBe('Rejected');
+  });
+
   it('handles v6 radius wording: travel charges, speed promises, "outside the metro"', () => {
     expect(reachOf('$2.00 A MILE ROUND TRIP PER TRUCK FOR ANY JOB OVER 20 MILES bottom of page')?.miles).toBeUndefined();
     const ok = { name: 'Storm Safe', address: '1 Main St, Oklahoma City, OK 73102, United States' };
@@ -295,6 +321,16 @@ describe('pipeline (mocked web + Jev)', () => {
     expect(again.results[0]?.outcome).toBe('keep');
     expect(again.replayed).toBe(first.results.filter(r => r?.stage === 'checked').length);
     expect(again.needsFresh).toBe(0);
+  });
+
+  it('re-asks Jev when a question is reworded, not only when one is added', async () => {
+    const jev = new MockClassifier(() => ({ supplies: { noul: 0.97 }, serves_state: { choice: 'yes' }, kind: { choice: 'supplier' } }));
+    const first = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', classifier: jev, fetcher });
+    const reworded = { ...S, niche: 'storm shelters or safe rooms' };   // changes the questions' wording
+    const offline = await runJob({ rows, template: directoryTemplate, rules: reworded, area: 'KS', fetcher, replay: first.evidence });
+    expect(offline.needsFresh).toBeGreaterThan(0);
+    const same = await runJob({ rows, template: directoryTemplate, rules: S, area: 'KS', fetcher, replay: first.evidence });
+    expect(same.needsFresh).toBe(0);
   });
 
   it('flags businesses whose new rules need a Jev answer the evidence lacks', async () => {

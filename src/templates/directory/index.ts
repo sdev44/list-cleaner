@@ -1,6 +1,6 @@
 // Directory builder: "does this business really belong in my directory, in my area?"
 // Logic ported from the extension's cleaner (v2.5.5); behaviour kept identical except `protectPlausible`.
-import { inArea, regionName, rowArea, sameArea, searchedInArea, US_STATES } from '../../core/area.js';
+import { inArea, nearNorthernIreland, regionName, rowArea, sameArea, searchedInArea, US_STATES } from '../../core/area.js';
 import { sameSiteUrl, siteHost } from '../../core/site.js';
 import { milesFromArea, phoneArea } from '../../core/geo.js';
 import type { CheckContext, Template } from '../../core/template.js';
@@ -199,9 +199,14 @@ export function keywordStage(row: Row, site: SiteRead, kw: KeywordResult, S: Dir
     if (kw.score === 0) return { result: 'Rejected', reason: 'Name and website never mention ' + S.niche };
     return { needsJev: true };
   }
-  if (core) return area && !inArea(row, area)
-    ? { result: 'Review', reason: `Google category "${row.category}" fits, but it may be outside ${regionName(area)}; ${site.status.toLowerCase()}` }
-    : { result: 'Clean', reason: `Google category "${row.category}" fits ${S.niche}; ${site.status.toLowerCase()}` };
+  if (core) {
+    // Located: by address, else by phone. Turning up in an area search is not enough on its own.
+    const known = rowArea(row) || phoneArea(row);
+    const located = !area || (known ? sameArea(known, area) : false);
+    return located
+      ? { result: 'Clean', reason: `Google category "${row.category}" fits ${S.niche}; ${site.status.toLowerCase()}` + (rowArea(row) ? '' : `; ${regionName(area)} phone number`) }
+      : { result: 'Review', reason: `Google category "${row.category}" fits, but it may be outside ${regionName(area)}${known ? '' : ' (no address)'}; ${site.status.toLowerCase()}` };
+  }
   if (kw.strong) return { needsJev: true };
   if (C.plausible.some(c => cat.includes(c)) && site.kind !== 'none')
     return { result: 'Review', reason: `${site.status}; business type (${row.category}) could offer ${S.niche}` };
@@ -235,7 +240,8 @@ export function jevRequest(row: Row, site: SiteRead, area: string, S: DirectoryR
         type: 'choice',
         instructions: `What kind of listing is this, with regard to ${S.niche}?`,
         criteria: {
-          supplier: `A business that sells, makes, installs, builds or services ${S.niche} for customers.`,
+          supplier: `A business whose main work is selling, making, installing, building or servicing ${S.niche} for customers.`,
+          side_service: `A business whose main trade is something else (for example a vet, shop, kennel or general builder) that also offers ${S.niche} as one of its services.`,
           facility_with_them: `A place that only has ${S.niche} for its own residents, guests, staff or members (a housing development, apartments, hotel, venue, school, campground, business premises) rather than supplying them.`,
           public_shelter: 'A public or community shelter, park shelter or emergency-management listing.',
           other: 'Something else.'
@@ -309,6 +315,9 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
   }
   if (supplies <= S.jevLow) return { result: 'Rejected', reason: `Jev: does not offer ${S.niche} (${pct(supplies)})` };
   if (supplies >= S.jevHigh) {
+    const side = kind === 'side_service' && (kindP.side_service ?? 0.6) >= 0.6 && !kw.strong;
+    if (side && S.sideServices === 'review' && (inState || serves === 'yes'))
+      return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}) as an extra to another main trade` };
     if (inState) return {
       result: 'Clean', reason: `Jev: offers ${S.niche} (${pct(supplies)})` + (sameArea(rowArea(row), area) ? '' : noAddressState && serves !== 'yes' ? '; no address, ' + (phoneState ? `${where} phone number` : `found in ${where} searches`) : '; serves ' + where)
     };
@@ -333,11 +342,14 @@ export function decideWithJev(row: Row, answers: Record<string, Answer>, area: s
       // Close to the area: a person should decide, however confident Jev is.
       if (distance !== null && distance > 0 && S.nearbyMiles > 0 && distance <= S.nearbyMiles)
         return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); based about ${distance} miles from ${where}, no sign on its site of serving it` };
+      if (S.nearbyMiles > 0 && area === 'NIR' && rowArea(row) === 'IRL' && nearNorthernIreland(row.address))
+        return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}); based just over the border in the Republic of Ireland` };
       return { result: 'Rejected', reason: `Based outside the area with no sign of serving ${where}` };
     }
     return { result: 'Review', reason: `Offers ${S.niche} (${pct(supplies)}) but service area unclear` };
   }
-  if (coreCategory(row, S) && inState) return { result: 'Clean', reason: `Google category "${row.category}" fits; Jev ${pct(supplies)}` };
+  // Jev was unsure: the Google category alone no longer decides (e.g. a grooming school listed as "Pet groomer").
+  if (coreCategory(row, S) && inState) return { result: 'Review', reason: `Google category "${row.category}" fits, but Jev is unsure (${pct(supplies)})` };
   return { result: 'Review', reason: `Jev unsure (${pct(supplies)} likely to offer ${S.niche})` };
 }
 
@@ -381,7 +393,7 @@ const TO_OUTCOME = { Clean: 'keep', Review: 'review', Rejected: 'remove' } as co
  */
 export function reviewPriority(reason: string, supplies: number | null, distance: number | null, strongName: boolean): number {
   const near = distance === null ? 0 : distance === 0 ? 8 : distance <= 50 ? 6 : distance <= 150 ? 3 : 0;
-  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves|mile reach and|website is also used by/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
+  if (supplies !== null && /may reach it|service area unclear|miles from|Jev says it serves|mile reach and|website is also used by|over the border|as an extra/.test(reason)) return Math.min(99, 85 + near + (/: "/.test(reason) ? 2 : 0));
   if (supplies !== null && /^Jev unsure/.test(reason)) return 50 + Math.round(supplies * 19) + Math.min(near, 5);
   if (/^Jev check failed|^Check failed|took longer/.test(reason)) return 45;
   return (strongName ? 40 : 20) + Math.min(near, 5);
@@ -408,7 +420,8 @@ async function check(row: Row, ctx: CheckContext<DirectoryRules>): Promise<Decis
         fields.clean_role = (r.answers.role?.choice || '').replace(/_/g, ' ');
         fields.clean_serves = r.answers.serves_state?.choice || '';
       } catch (e) {
-        if ((e as { code?: string }).code === 'auth') throw e;
+        const code = (e as { code?: string }).code;
+        if (code === 'auth' || code === 'needs-fresh') throw e;
         d = { result: 'Review', reason: 'Jev check failed: ' + (e as Error).message };
       }
     } else d = decideWithoutJev(row, kw, ctx.area, S);
